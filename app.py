@@ -2,8 +2,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import re
+import io
 
-# --- 절대 무결성 데이터 파싱 로직 ---
+# --- 절대 무결성 데이터 파싱 로직 (날짜 형식 호환성 극대화 및 오타 수정본) ---
 def parse_sales_data(uploaded_file):
     try:
         # 헤더 없이 원본 파일 로드
@@ -18,13 +19,52 @@ def parse_sales_data(uploaded_file):
                 break
                 
         if header_idx == -1:
-            st.error("엑셀 파일에서 '구분'이 포함된 항목을 찾을 수 없습니다.")
+            st.error("엑셀 파일에서 '구분'이 포함된 항목을 찾을 수 없습니다. 파일 구성을 확인해주십시오.")
             return None
             
         # 2. 데이터 블록 추출
         df_table = df_raw.iloc[header_idx:].dropna(how='all').reset_index(drop=True)
-        headers = [str(x).replace(" ", "").replace("\n", "") for x in df_table.iloc[0].values]
+        raw_headers = df_table.iloc[0].values
         df_data = df_table.iloc[1:]
+        
+        # 날짜 컬럼 사전 가공 및 규격화
+        parsed_dates = {}
+        for col_idx in range(1, len(raw_headers)):
+            cell_val = raw_headers[col_idx]
+            if pd.isna(cell_val):
+                continue
+                
+            dt = None
+            # Pandas의 Timestamp/Datetime 객체일 경우 직접 변환
+            if isinstance(cell_val, (datetime, pd.Timestamp)):
+                dt = cell_val
+            # 엑셀 고유 일련번호 형식일 경우 변환
+            elif isinstance(cell_val, (int, float)) and 40000 <= cell_val <= 60000:
+                try:
+                    dt = pd.to_datetime(cell_val, unit='D', origin='1899-12-30')
+                except:
+                    pass
+            # 문자열일 경우 숫자만 추출하여 변환
+            else:
+                date_str = str(cell_val).strip()
+                nums = re.findall(r'\d+', date_str)
+                if len(nums) >= 2:
+                    yy = int(nums[0])
+                    mm = int(nums)  # 이전 코드의 int(nums) 오타를 int(nums)로 수정
+                    if yy < 100:
+                        yy += 2000
+                    if 1 <= mm <= 12:
+                        try:
+                            dt = datetime(yy, mm, 1)
+                        except:
+                            pass
+                elif len(nums) == 1:
+                    mm = int(nums[0])
+                    if 1 <= mm <= 12:
+                        dt = datetime(datetime.now().year, mm, 1)
+                        
+            if dt is not None:
+                parsed_dates[col_idx] = dt.strftime('%Y-%m-%d')
         
         melted_rows = []
         
@@ -42,32 +82,19 @@ def parse_sales_data(uploaded_file):
             elif '접수' in metric_raw: metric = '접수'
             else: metric = metric_raw
             
-            # 날짜와 수치 매핑
-            for col_idx in range(1, len(headers)):
-                date_raw = headers[col_idx]
-                if date_raw == 'nan' or not date_raw:
-                    continue
+            # 사전 정제된 날짜 데이터를 기준으로 매핑 진행
+            for col_idx, period_str in parsed_dates.items():
+                val_raw = str(row.iloc[col_idx]).strip()
+                v_num = re.sub(r'[^\d.-]', '', val_raw)
+                try:
+                    val = float(v_num) if v_num and v_num != '-' else 0.0
+                except:
+                    val = 0.0
                     
-                nums = re.findall(r'\d+', date_raw)
-                # 날짜에 숫자 2개 이상(연도, 월)이 존재할 경우만 처리
-                if len(nums) >= 2:
-                    yy, mm = int(nums[0]), int(nums)
-                    yy = yy + 2000 if yy < 100 else yy
-                    
-                    if 2000 <= yy <= 2100 and 1 <= mm <= 12:
-                        period_str = f"{yy:04d}-{mm:02d}-01"
-                        val_raw = str(row.iloc[col_idx]).strip()
-                        
-                        v_num = re.sub(r'[^\d.-]', '', val_raw)
-                        try:
-                            val = float(v_num) if v_num and v_num != '-' else 0.0
-                        except:
-                            val = 0.0
-                            
-                        melted_rows.append({'period': period_str, 'metric': metric, 'value': val})
+                melted_rows.append({'period': period_str, 'metric': metric, 'value': val})
                         
         if not melted_rows:
-            st.error("분석 가능한 데이터(날짜 및 수치)를 추출하지 못했습니다.")
+            st.error("분석 가능한 데이터(날짜 및 수치)를 추출하지 못했습니다. 날짜 형식이 규격에 맞는지 확인해주십시오.")
             return None
             
         # 4. 데이터프레임 변환 및 피벗 (중복값 방지)
@@ -126,7 +153,6 @@ def generate_ai_analysis(df, crm_df=None):
         
     latest = df.iloc[-1]
     analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 실적 분석 요약"]
-
     last_year_month = latest['period'].replace(year=latest['period'].year - 1)
     last_year_data = df[df['period'] == last_year_month]
     
@@ -137,16 +163,16 @@ def generate_ai_analysis(df, crm_df=None):
         
         trend_reception = "증가" if reception_diff > 0 else "감소"
         analysis_texts.append(f"- 전년 동월 대비: 접수 건수는 {abs(reception_diff):,.0f}건 {trend_reception}하였으며, 성공률은 {success_rate_diff:+.1f}%p 변동을 보였습니다.")
-
+        
     if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별']):
         group_stats = crm_df.groupby(['연령대', '성별'])['성공여부'].apply(lambda x: (x == '성공').mean()).sort_values(ascending=False)
         if not group_stats.empty:
             best_group = group_stats.index[0]
             analysis_texts.append(f"- 고객 세분화 분석: {best_group[0]} {best_group} 고객군의 성공률이 {group_stats.iloc[0]:.1%}로 가장 높게 나타났습니다. 해당 타겟 중심의 마케팅 전략 수립을 권장합니다.")
-
+            
     return "\n\n".join(analysis_texts)
 
-# --- 대시보드 UI ---
+# --- 대시보드 UI 구성 ---
 st.set_page_config(layout="wide", page_title="매출 및 CRM 대시보드")
 st.title("매출 지표 통합 대시보드")
 
@@ -157,14 +183,14 @@ crm_file = st.sidebar.file_uploader("2. CRM 데이터 (선택)", type=["xlsx", "
 if sales_file:
     df = parse_sales_data(sales_file)
     crm_df = parse_crm_data(crm_file) if crm_file else None
-
+    
     if df is not None and not df.empty:
         st.sidebar.success("데이터 분석이 완료되었습니다.")
         
         latest_data = df.iloc[-1]
         prev_data = df.iloc[-2] if len(df) > 1 else None
-
         st.subheader(f"{latest_data['period'].strftime('%Y년 %m월')} 핵심 성과 지표 (M-1 기준)")
+        
         kpi_cols = st.columns(4)
         for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
             val = latest_data[metric]
@@ -184,7 +210,7 @@ if sales_file:
             
             best_month = df.loc[df['성공율'].idxmax()]
             st.info(f"최고 효율 기록월: {best_month['period'].strftime('%Y년 %m월')} (성공율 {best_month['성공율']:.1%})")
-
+            
         with col2:
             st.subheader("설치 완료 건수 추이")
             start_d = df['period'].min().date()
@@ -212,3 +238,8 @@ if sales_file:
         
         with st.expander("원본 데이터 테이블 보기 (시스템 추출본)"): 
             st.dataframe(df)
+            
+    else:
+        st.error("데이터를 처리할 수 없습니다. 업로드한 파일의 양식을 확인해주십시오.")
+else:
+    st.info("좌측 사이드바에서 매출 데이터 파일을 업로드하면 대시보드가 실행됩니다.")
