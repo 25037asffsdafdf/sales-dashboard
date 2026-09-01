@@ -1,87 +1,86 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import re
 
 # --- 데이터 파싱 로직 ---
 def parse_sales_data(uploaded_file):
     try:
-        # 헤더 없이 원본 데이터 전체 로드
         df_raw = pd.read_excel(uploaded_file, header=None)
         
-        target_row_indices = []
-        # 한 줄씩 읽으며 '구분' 텍스트가 있는 행 번호 추출
+        start_idx = None
+        target_col = None
+        
+        # 1. 항목 인식 (공백 무시 및 범용 탐색)
         for idx, row in df_raw.iterrows():
-            row_str = row.astype(str).str.replace(r'\s+', '', regex=True)
-            if any(row_str == '구분'):
-                target_row_indices.append(idx)
+            clean_row = row.astype(str).str.replace(r'\s+', '', regex=True)
+            for col_idx, cell_value in enumerate(clean_row):
+                if '구분' in cell_value:
+                    start_idx = idx
+                    target_col = col_idx
+                    break
+            if start_idx is not None:
+                break
                 
-        if not target_row_indices:
-            st.error("데이터 인식 실패: 파일 내에 '구분' 항목을 찾을 수 없습니다.")
+        if start_idx is None:
+            st.error("엑셀 파일 내에서 '구분' 항목을 찾을 수 없습니다. 표의 형태를 확인해주십시오.")
             return None
             
-        all_melted = []
-        for i, start_idx in enumerate(target_row_indices):
-            end_idx = target_row_indices[i+1] if i+1 < len(target_row_indices) else len(df_raw)
-            block = df_raw.iloc[start_idx:end_idx].copy()
-            
-            # 첫 번째 행을 헤더로 지정
-            headers = block.iloc[0].astype(str).str.replace(r'\s+', '', regex=True).tolist()
-            data = block.iloc[1:]
-            data.columns = headers
-            
-            if '구분' not in data.columns:
-                continue
-                
-            # 유효한 열만 추출 (빈 값 제외)
-            valid_cols = [c for c in data.columns if c not in ('nan', 'None', '')]
-            data = data[valid_cols].copy()
-            
-            # 가로로 나열된 월별 데이터를 세로형 구조로 변환
-            melted = data.melt(id_vars=['구분'], var_name='period_str', value_name='value')
-            all_melted.append(melted)
-            
-        if not all_melted:
-            st.error("데이터 추출 실패: 유효한 데이터 영역을 찾지 못했습니다.")
+        df_table = df_raw.iloc[start_idx:].copy()
+        
+        # 2. 헤더 설정
+        headers = df_table.iloc[0].astype(str).str.replace(r'\s+', '', regex=True).tolist()
+        df_table.columns = headers
+        df_table = df_table.iloc[1:]
+        
+        g_col = headers[target_col]
+        
+        melted = df_table.melt(id_vars=[g_col], var_name='period_str', value_name='value')
+        melted = melted.rename(columns={g_col: 'metric'})
+        
+        # 3. 결측치 및 불필요한 데이터 제거
+        melted = melted[~melted['period_str'].str.contains('nan', case=False, na=False)]
+        melted = melted[~melted['metric'].astype(str).str.contains('nan', case=False, na=False)]
+        
+        # 4. 날짜 데이터 정제 (숫자만 추출하여 정확한 날짜로 매핑)
+        def parse_date(p):
+            nums = re.sub(r'[^\d]', '', str(p))
+            if len(nums) == 3: return f"20{nums[:2]}-0{nums[-1]}-01"
+            elif len(nums) == 4: return f"20{nums[:2]}-{nums[2:]}-01"
+            elif len(nums) == 5: return f"{nums[:4]}-0{nums[-1]}-01"
+            elif len(nums) == 6: return f"{nums[:4]}-{nums[4:]}-01"
             return None
             
-        # 다중 테이블 병합 및 정제
-        combined_df = pd.concat(all_melted, ignore_index=True)
-        combined_df = combined_df.rename(columns={'구분': 'metric'})
-        combined_df = combined_df.dropna(subset=['metric', 'value'])
-        combined_df['metric'] = combined_df['metric'].astype(str).str.replace(r'\s+', '', regex=True)
+        melted['period_dt'] = pd.to_datetime(melted['period_str'].apply(parse_date), errors='coerce')
+        melted = melted.dropna(subset=['period_dt'])
         
-        # 월별 표기 텍스트 보정 (예: 25.1 -> 2501)
-        def clean_period(p):
-            p = str(p).replace('월', '').replace('.', '').replace('년', '').strip()
-            if len(p) == 3: 
-                return p[:2] + '0' + p[2:]
-            return p
+        # 5. 지표명 표준화
+        def standardize_metric(m):
+            if '접수' in m and '성공' in m and ('율' in m or '률' in m or '비' in m or '比' in m): return '성공율'
+            if '성공' in m and '율' in m: return '성공율'
+            if '접수' in m: return '접수'
+            if '컨택' in m: return '컨택'
+            if '설치' in m and '완료' in m: return '설치완료'
+            if '성공' in m: return '성공'
+            return m
             
-        combined_df['period_str'] = combined_df['period_str'].apply(clean_period)
+        melted['metric'] = melted['metric'].astype(str).str.replace(r'\s+', '', regex=True).apply(standardize_metric)
         
-        # 지표별 피벗 테이블 생성
-        final_df = combined_df.pivot_table(index='period_str', columns='metric', values='value', aggfunc='first').reset_index()
-        final_df.columns.name = None
+        # 6. 피벗 테이블 생성
+        final_df = melted.pivot_table(index='period_dt', columns='metric', values='value', aggfunc='first').reset_index()
+        final_df = final_df.rename(columns={'period_dt': 'period'})
         
-        # 날짜 형식 변환
-        final_df['period'] = pd.to_datetime(final_df['period_str'], format='%y%m', errors='coerce')
-        final_df = final_df.dropna(subset=['period'])
-        
-        # 숫자 데이터 타입 변환
-        metrics_to_check = ['접수', '컨택', '성공', '설치완료', '접수比성공율', '접수비성공율', '성공율']
-        for col in metrics_to_check:
+        # 7. 숫자 변환 및 계산
+        for col in ['접수', '컨택', '성공', '설치완료', '성공율']:
             if col in final_df.columns:
-                final_df[col] = final_df[col].astype(str).replace(r'[^\d.]', '', regex=True)
+                final_df[col] = final_df[col].astype(str).apply(lambda x: re.sub(r'[^\d.]', '', x))
                 final_df[col] = pd.to_numeric(final_df[col], errors='coerce')
-
-        # 성공율 소수점 보정
-        success_col = next((c for c in ['접수比성공율', '접수비성공율', '성공율'] if c in final_df.columns), None)
-        if success_col:
-            final_df['성공율'] = final_df[success_col]
-            final_df.loc[final_df['성공율'] > 1.0, '성공율'] = final_df['성공율'] / 100.0
+                
+        if '성공율' in final_df.columns:
+            final_df.loc[final_df['성공율'] > 1.0, '성공율'] /= 100.0
         elif '성공' in final_df.columns and '접수' in final_df.columns:
-             final_df['성공율'] = (final_df['성공'] / final_df['접수']).fillna(0)
-             
+            final_df['성공율'] = (final_df['성공'] / final_df['접수']).fillna(0)
+            
         cols_to_keep = ['period', '접수', '컨택', '성공', '성공율', '설치완료']
         final_df = final_df[[c for c in cols_to_keep if c in final_df.columns]]
         final_df = final_df.sort_values('period').reset_index(drop=True)
@@ -181,8 +180,7 @@ if sales_file:
                 st.subheader("설치 완료 건수 추이")
                 start_d, end_d = df['period'].min().to_pydatetime(), df['period'].max().to_pydatetime()
                 
-                # 그래프 형태 선택 기능 추가
-                chart_type = st.radio("그래프 형태 선택", ["막대그래프", "꺾은선형그래프"], horizontal=True)
+                chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
                 date_range = st.date_input("조회 기간 설정", value=(start_d, end_d), min_value=start_d, max_value=end_d)
                 
                 if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -191,10 +189,11 @@ if sales_file:
                     
                     if not chart_df.empty:
                         chart_df['조회월'] = chart_df['period'].dt.strftime('%y-%m')
-                        chart_data = chart_df.set_index('조회월')['설치완료']
                         
-                        # 선택된 형태에 따라 차트 출력
-                        if chart_type == "막대그래프":
+                        # 인덱스 중복 오류 방지를 위한 그룹화 합산
+                        chart_data = chart_df.groupby('조회월')['설치완료'].sum()
+                        
+                        if chart_type == "막대 그래프":
                             st.bar_chart(chart_data)
                         else:
                             st.line_chart(chart_data)
