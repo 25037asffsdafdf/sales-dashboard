@@ -1,83 +1,73 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 from datetime import datetime
-import io
-import re
 
 # --- 데이터 파싱 로직 ---
 def parse_sales_data(uploaded_file):
-    """
-    엑셀 파일 내의 공백을 제거하고 지표 데이터를 추출합니다.
-    넘파이(NumPy) 배열 검색을 사용하여 인덱스 오류를 방지합니다.
-    """
     try:
-        xls_content = uploaded_file.getvalue()
-        df_raw = pd.read_excel(io.BytesIO(xls_content), header=None, sheet_name=0)
-
-        # 전체 셀의 공백 제거 및 문자열 변환
-        df_clean = df_raw.astype(str).replace(r'\s+', '', regex=True)
-
-        # '구분' 텍스트가 위치한 행 인덱스 탐색 (NumPy 활용)
-        rows, cols = np.where(df_clean.values == '구분')
-        header_indices = sorted(list(set(rows)))
-
-        if not header_indices:
-            st.error("엑셀 파일 내에서 '구분' 항목을 찾을 수 없습니다. 파일 형식을 확인해주십시오.")
+        # 헤더 없이 원본 데이터 전체 로드
+        df_raw = pd.read_excel(uploaded_file, header=None)
+        
+        target_row_indices = []
+        # 한 줄씩 읽으며 '구분' 텍스트가 있는 행 번호 추출
+        for idx, row in df_raw.iterrows():
+            row_str = row.astype(str).str.replace(r'\s+', '', regex=True)
+            if any(row_str == '구분'):
+                target_row_indices.append(idx)
+                
+        if not target_row_indices:
+            st.error("데이터 인식 실패: 파일 내에 '구분' 항목을 찾을 수 없습니다.")
             return None
-
-        all_data_frames = []
-        for i, start_row in enumerate(header_indices):
-            end_row = header_indices[i+1] if i + 1 < len(header_indices) else len(df_clean)
-            table_df = df_clean.iloc[start_row:end_row].copy()
             
-            # 'nan' 문자열을 실제 결측치로 변환 후 빈 열/행 제거
-            table_df = table_df.replace('nan', np.nan)
-            table_df = table_df.dropna(how='all', axis=1).dropna(how='all', axis=0).reset_index(drop=True)
+        all_melted = []
+        for i, start_idx in enumerate(target_row_indices):
+            end_idx = target_row_indices[i+1] if i+1 < len(target_row_indices) else len(df_raw)
+            block = df_raw.iloc[start_idx:end_idx].copy()
             
-            headers = table_df.iloc[0].tolist()
-            data = table_df.iloc[1:]
-            
-            valid_headers = [h for h in headers if pd.notnull(h) and str(h).strip() != 'nan']
-            if len(valid_headers) < 2: 
-                continue 
-
+            # 첫 번째 행을 헤더로 지정
+            headers = block.iloc[0].astype(str).str.replace(r'\s+', '', regex=True).tolist()
+            data = block.iloc[1:]
             data.columns = headers
-            melted_df = data.melt(
-                id_vars=[headers[0]], 
-                var_name='period_str', 
-                value_name='value'
-            ).rename(columns={headers[0]: 'metric'})
             
-            all_data_frames.append(melted_df)
-
-        if not all_data_frames:
-            st.error("데이터 추출에 실패하였습니다.")
+            if '구분' not in data.columns:
+                continue
+                
+            # 유효한 열만 추출 (빈 값 제외)
+            valid_cols = [c for c in data.columns if c not in ('nan', 'None', '')]
+            data = data[valid_cols].copy()
+            
+            # 가로로 나열된 월별 데이터를 세로형 구조로 변환
+            melted = data.melt(id_vars=['구분'], var_name='period_str', value_name='value')
+            all_melted.append(melted)
+            
+        if not all_melted:
+            st.error("데이터 추출 실패: 유효한 데이터 영역을 찾지 못했습니다.")
             return None
-
-        # 데이터 병합 및 정제
-        combined_df = pd.concat(all_data_frames, ignore_index=True)
-        combined_df = combined_df.dropna(subset=['metric', 'period_str', 'value'])
-        combined_df = combined_df[~combined_df['period_str'].astype(str).str.contains('nan', case=False, na=False)]
-
-        # 날짜 문자열 정제 함수
+            
+        # 다중 테이블 병합 및 정제
+        combined_df = pd.concat(all_melted, ignore_index=True)
+        combined_df = combined_df.rename(columns={'구분': 'metric'})
+        combined_df = combined_df.dropna(subset=['metric', 'value'])
+        combined_df['metric'] = combined_df['metric'].astype(str).str.replace(r'\s+', '', regex=True)
+        
+        # 월별 표기 텍스트 보정 (예: 25.1 -> 2501)
         def clean_period(p):
-            p = str(p).replace('월', '').replace('.', '').replace('년', '')
+            p = str(p).replace('월', '').replace('.', '').replace('년', '').strip()
             if len(p) == 3: 
                 return p[:2] + '0' + p[2:]
             return p
-
+            
         combined_df['period_str'] = combined_df['period_str'].apply(clean_period)
-
-        # 피벗 테이블 생성
+        
+        # 지표별 피벗 테이블 생성
         final_df = combined_df.pivot_table(index='period_str', columns='metric', values='value', aggfunc='first').reset_index()
         final_df.columns.name = None
         
         # 날짜 형식 변환
         final_df['period'] = pd.to_datetime(final_df['period_str'], format='%y%m', errors='coerce')
-        final_df = final_df.dropna(subset=['period']) 
+        final_df = final_df.dropna(subset=['period'])
         
-        # 지표 컬럼 숫자형 변환 처리
+        # 숫자 데이터 타입 변환
         metrics_to_check = ['접수', '컨택', '성공', '설치완료', '접수比성공율', '접수비성공율', '성공율']
         for col in metrics_to_check:
             if col in final_df.columns:
@@ -97,13 +87,11 @@ def parse_sales_data(uploaded_file):
         final_df = final_df.sort_values('period').reset_index(drop=True)
         
         return final_df
-
     except Exception as e:
-        st.error(f"데이터 분석 중 오류가 발생하였습니다: {e}")
+        st.error(f"데이터 처리 오류: {e}")
         return None
 
 def parse_crm_data(uploaded_file):
-    """CRM 데이터를 정제하고 연령대를 계산합니다."""
     try:
         crm_df = pd.read_excel(uploaded_file)
         crm_df.columns = [str(col).strip().replace(" ", "") for col in crm_df.columns]
@@ -121,11 +109,10 @@ def parse_crm_data(uploaded_file):
                 
         return crm_df
     except Exception as e:
-        st.error(f"CRM 데이터 처리 오류가 발생하였습니다: {e}")
+        st.error(f"CRM 데이터 처리 오류: {e}")
         return None
 
 def generate_ai_analysis(df, crm_df=None):
-    """데이터를 기반으로 종합 분석 보고서를 생성합니다."""
     if df is None or df.empty: 
         return "분석할 데이터가 존재하지 않습니다."
         
@@ -164,7 +151,7 @@ if sales_file:
     crm_df = parse_crm_data(crm_file) if crm_file else None
 
     if df is not None and not df.empty:
-        st.sidebar.success("매출 데이터 분석이 완료되었습니다.")
+        st.sidebar.success("데이터 분석이 완료되었습니다.")
         latest_data = df.iloc[-1]
         prev_data = df.iloc[-2] if len(df) > 1 else None
 
@@ -193,6 +180,9 @@ if sales_file:
             if '설치완료' in df.columns:
                 st.subheader("설치 완료 건수 추이")
                 start_d, end_d = df['period'].min().to_pydatetime(), df['period'].max().to_pydatetime()
+                
+                # 그래프 형태 선택 기능 추가
+                chart_type = st.radio("그래프 형태 선택", ["막대그래프", "꺾은선형그래프"], horizontal=True)
                 date_range = st.date_input("조회 기간 설정", value=(start_d, end_d), min_value=start_d, max_value=end_d)
                 
                 if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -201,7 +191,13 @@ if sales_file:
                     
                     if not chart_df.empty:
                         chart_df['조회월'] = chart_df['period'].dt.strftime('%y-%m')
-                        st.bar_chart(chart_df.set_index('조회월')['설치완료'])
+                        chart_data = chart_df.set_index('조회월')['설치완료']
+                        
+                        # 선택된 형태에 따라 차트 출력
+                        if chart_type == "막대그래프":
+                            st.bar_chart(chart_data)
+                        else:
+                            st.line_chart(chart_data)
         
         with st.expander("원본 데이터 테이블 보기"): 
             st.dataframe(df)
