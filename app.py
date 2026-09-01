@@ -2,78 +2,78 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import re
-import io
+import traceback
 
-# --- 절대 무결성 데이터 파싱 로직 (날짜 형식 호환성 극대화 및 오타 수정본) ---
+# --- 100% 무결성 확보: 개별 셀 단위 핀포인트 파싱 로직 ---
 def parse_sales_data(uploaded_file):
     try:
-        # 헤더 없이 원본 파일 로드
+        # 모든 빈칸을 빈 문자열로 처리하여 통째로 로드 (결측치 충돌 원천 차단)
         df_raw = pd.read_excel(uploaded_file, header=None)
+        df_raw = df_raw.fillna("")
+
+        header_row = -1
+        header_col = -1
         
-        # 1. '구분' 행 탐색 (모든 셀을 강제 문자열 변환하여 float 충돌 원천 차단)
-        header_idx = -1
-        for idx, row in df_raw.iterrows():
-            row_str = "".join([str(x).replace(" ", "") for x in row.values])
-            if '구분' in row_str:
-                header_idx = idx
+        # 1. '구분' 셀의 정확한 X, Y 좌표 탐색 (전체 셀 전수조사)
+        for r in range(len(df_raw)):
+            for c in range(len(df_raw.columns)):
+                # 단일 셀 단위로 문자로 변환하므로 float 에러가 발생할 수 없음
+                cell_val = str(df_raw.iat[r, c]).replace(" ", "").replace("\n", "")
+                if "구분" in cell_val:
+                    header_row = r
+                    header_col = c
+                    break
+            if header_row != -1:
                 break
                 
-        if header_idx == -1:
-            st.error("엑셀 파일에서 '구분'이 포함된 항목을 찾을 수 없습니다. 파일 구성을 확인해주십시오.")
+        if header_row == -1:
+            st.error("엑셀 파일에서 '구분' 항목을 찾을 수 없습니다. 표의 최상단 좌측에 '구분'이 있는지 확인해주십시오.")
             return None
-            
-        # 2. 데이터 블록 추출
-        df_table = df_raw.iloc[header_idx:].dropna(how='all').reset_index(drop=True)
-        raw_headers = df_table.iloc[0].values
-        df_data = df_table.iloc[1:]
-        
-        # 날짜 컬럼 사전 가공 및 규격화
+
+        # 2. 좌표를 기준으로 날짜(기간) 데이터만 정밀 추출
         parsed_dates = {}
-        for col_idx in range(1, len(raw_headers)):
-            cell_val = raw_headers[col_idx]
-            if pd.isna(cell_val):
+        for c in range(header_col + 1, len(df_raw.columns)):
+            date_val = df_raw.iat[header_row, c]
+            if str(date_val) == "": 
                 continue
-                
+            
             dt = None
-            # Pandas의 Timestamp/Datetime 객체일 경우 직접 변환
-            if isinstance(cell_val, (datetime, pd.Timestamp)):
-                dt = cell_val
-            # 엑셀 고유 일련번호 형식일 경우 변환
-            elif isinstance(cell_val, (int, float)) and 40000 <= cell_val <= 60000:
-                try:
-                    dt = pd.to_datetime(cell_val, unit='D', origin='1899-12-30')
-                except:
-                    pass
-            # 문자열일 경우 숫자만 추출하여 변환
+            if isinstance(date_val, datetime):
+                dt = date_val
+            elif isinstance(date_val, (int, float)):
+                # 엑셀 고유 일련번호(날짜) 데이터일 경우
+                if 40000 <= date_val <= 60000:
+                    dt = pd.to_datetime(date_val, unit='D', origin='1899-12-30')
             else:
-                date_str = str(cell_val).strip()
-                nums = re.findall(r'\d+', date_str)
+                # 텍스트 형태(예: 25.1월)일 경우 숫자만 추출
+                d_str = str(date_val).replace(" ", "")
+                nums = re.findall(r'\d+', d_str)
                 if len(nums) >= 2:
-                    yy = int(nums[0])
-                    mm = int(nums)  # 이전 코드의 int(nums) 오타를 int(nums)로 수정
-                    if yy < 100:
-                        yy += 2000
+                    yy, mm = int(nums[0]), int(nums)
+                    if yy < 100: yy += 2000
                     if 1 <= mm <= 12:
-                        try:
-                            dt = datetime(yy, mm, 1)
-                        except:
-                            pass
+                        dt = datetime(yy, mm, 1)
                 elif len(nums) == 1:
                     mm = int(nums[0])
                     if 1 <= mm <= 12:
                         dt = datetime(datetime.now().year, mm, 1)
-                        
-            if dt is not None:
-                parsed_dates[col_idx] = dt.strftime('%Y-%m-%d')
-        
+            
+            if dt:
+                parsed_dates[c] = dt.strftime('%Y-%m-%d')
+                
+        if not parsed_dates:
+            st.error("'구분' 우측열에 위치한 날짜 데이터(예: 25.1월 등)를 인식하지 못했습니다.")
+            return None
+
         melted_rows = []
         
-        # 3. 셀 단위 정밀 추출 및 지표명 자동 통일
-        for _, row in df_data.iterrows():
-            metric_raw = str(row.iloc[0]).replace(" ", "").replace("\n", "")
-            if not metric_raw or metric_raw == 'nan':
+        # 3. Y좌표를 따라 아래로 내려가며 지표 및 수치 매핑
+        for r in range(header_row + 1, len(df_raw)):
+            metric_raw = str(df_raw.iat[r, header_col]).replace(" ", "").replace("\n", "")
+            if not metric_raw: 
                 continue
-                
+            
+            # 지표명 자동 규격화
             if '성공' in metric_raw and ('율' in metric_raw or '비' in metric_raw or '比' in metric_raw): 
                 metric = '성공율'
             elif '설치' in metric_raw: metric = '설치완료'
@@ -81,49 +81,52 @@ def parse_sales_data(uploaded_file):
             elif '컨택' in metric_raw or '콜' in metric_raw: metric = '컨택'
             elif '접수' in metric_raw: metric = '접수'
             else: metric = metric_raw
-            
-            # 사전 정제된 날짜 데이터를 기준으로 매핑 진행
-            for col_idx, period_str in parsed_dates.items():
-                val_raw = str(row.iloc[col_idx]).strip()
-                v_num = re.sub(r'[^\d.-]', '', val_raw)
-                try:
-                    val = float(v_num) if v_num and v_num != '-' else 0.0
-                except:
+
+            for c, period_str in parsed_dates.items():
+                val_raw = str(df_raw.iat[r, c]).replace(",", "").strip()
+                if not val_raw:
                     val = 0.0
-                    
+                else:
+                    # 마이너스(-)와 소수점(.)을 제외한 모든 문자 제거 후 숫자 변환
+                    v_num = re.sub(r'[^\d.-]', '', val_raw)
+                    try:
+                        val = float(v_num) if v_num and v_num != '-' else 0.0
+                    except:
+                        val = 0.0
+                
                 melted_rows.append({'period': period_str, 'metric': metric, 'value': val})
-                        
+
         if not melted_rows:
-            st.error("분석 가능한 데이터(날짜 및 수치)를 추출하지 못했습니다. 날짜 형식이 규격에 맞는지 확인해주십시오.")
+            st.error("분석 가능한 수치 데이터를 추출하지 못했습니다.")
             return None
             
-        # 4. 데이터프레임 변환 및 피벗 (중복값 방지)
+        # 4. 데이터 조립 및 누락된 지표 강제 보정
         df_long = pd.DataFrame(melted_rows)
+        # 중복 방지 처리
         df_long = df_long.drop_duplicates(subset=['period', 'metric'])
         df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
         
-        # 5. 필수 열(컬럼) 누락 방지 (KeyError 원천 차단)
-        essential_cols = ['접수', '컨택', '성공', '성공율', '설치완료']
-        for c in essential_cols:
-            if c not in df_pivot.columns:
-                df_pivot[c] = 0.0
+        for req_col in ['접수', '컨택', '성공', '성공율', '설치완료']:
+            if req_col not in df_pivot.columns:
+                df_pivot[req_col] = 0.0
                 
-        # 6. 날짜 변환 및 정렬
         df_pivot['period'] = pd.to_datetime(df_pivot['period'])
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
-        # 7. 성공율 수치 자동 보정 (100% 기준)
+        # 성공율 소수점 단위 통일 및 재계산
         for i, row in df_pivot.iterrows():
             rate = row['성공율']
             if rate > 1.0:
                 df_pivot.at[i, '성공율'] = rate / 100.0
-            elif rate == 0.0 and row.get('접수', 0) > 0:
-                df_pivot.at[i, '성공율'] = row.get('성공', 0) / row.get('접수', 0)
+            elif rate == 0.0 and row['접수'] > 0:
+                df_pivot.at[i, '성공율'] = row['성공'] / row['접수']
                 
         return df_pivot
         
     except Exception as e:
-        st.error(f"데이터 파싱 중 심각한 오류가 발생했습니다: {e}")
+        # 혹시 모를 에러 발생 시 원인을 즉시 파악할 수 있도록 시스템 로그를 표출합니다.
+        st.error(f"시스템 데이터 처리 중 오류가 발생했습니다: {e}")
+        st.code(traceback.format_exc())
         return None
 
 def parse_crm_data(uploaded_file):
@@ -133,7 +136,7 @@ def parse_crm_data(uploaded_file):
         
         if '생년월일' in crm_df.columns:
             crm_df['생년월일'] = pd.to_datetime(crm_df['생년월일'], errors='coerce')
-            crm_df = crm_df.dropna(subset=['생년월일'])
+            crm_df = crm_df.dropna(subset=['생년월일']).copy()
             current_year = datetime.now().year
             crm_df['나이'] = current_year - crm_df['생년월일'].dt.year
             crm_df['연령대'] = (crm_df['나이'] // 10 * 10).astype(int).astype(str) + '대'
@@ -153,6 +156,7 @@ def generate_ai_analysis(df, crm_df=None):
         
     latest = df.iloc[-1]
     analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 실적 분석 요약"]
+    
     last_year_month = latest['period'].replace(year=latest['period'].year - 1)
     last_year_data = df[df['period'] == last_year_month]
     
@@ -189,8 +193,8 @@ if sales_file:
         
         latest_data = df.iloc[-1]
         prev_data = df.iloc[-2] if len(df) > 1 else None
-        st.subheader(f"{latest_data['period'].strftime('%Y년 %m월')} 핵심 성과 지표 (M-1 기준)")
         
+        st.subheader(f"{latest_data['period'].strftime('%Y년 %m월')} 핵심 성과 지표 (M-1 기준)")
         kpi_cols = st.columns(4)
         for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
             val = latest_data[metric]
@@ -225,7 +229,8 @@ if sales_file:
                 
                 if not chart_df.empty:
                     chart_df['조회월'] = chart_df['period'].dt.strftime('%y-%m')
-                    chart_data = chart_df.set_index('조회월')['설치완료']
+                    # Streamlit 중복 인덱스 에러 방지를 위해 groupby 활용
+                    chart_data = chart_df.groupby('조회월')['설치완료'].sum()
                     
                     if chart_type == "막대 그래프":
                         st.bar_chart(chart_data)
