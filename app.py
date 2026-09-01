@@ -6,34 +6,34 @@ import re
 # --- 절대 무결성 데이터 파싱 로직 ---
 def parse_sales_data(uploaded_file):
     try:
+        # 헤더 없이 원본 파일 로드
         df_raw = pd.read_excel(uploaded_file, header=None)
         
-        # 1. '구분' 행 찾기
+        # 1. '구분' 행 탐색 (모든 셀을 강제 문자열 변환하여 float 충돌 원천 차단)
         header_idx = -1
         for idx, row in df_raw.iterrows():
-            row_str = "".join(row.astype(str)).replace(" ", "")
+            row_str = "".join([str(x).replace(" ", "") for x in row.values])
             if '구분' in row_str:
                 header_idx = idx
                 break
                 
         if header_idx == -1:
-            st.error("엑셀 파일에서 '구분'이 포함된 행을 찾을 수 없습니다. 양식을 확인해주십시오.")
+            st.error("엑셀 파일에서 '구분'이 포함된 항목을 찾을 수 없습니다.")
             return None
             
         # 2. 데이터 블록 추출
         df_table = df_raw.iloc[header_idx:].dropna(how='all').reset_index(drop=True)
-        headers = df_table.iloc[0].astype(str).tolist()
+        headers = [str(x).replace(" ", "").replace("\n", "") for x in df_table.iloc[0].values]
         df_data = df_table.iloc[1:]
         
         melted_rows = []
         
-        # 3. 셀 단위 정밀 추출 및 명칭 강제 표준화
+        # 3. 셀 단위 정밀 추출 및 지표명 자동 통일
         for _, row in df_data.iterrows():
-            metric_raw = str(row.iloc[0]).replace(" ", "")
+            metric_raw = str(row.iloc[0]).replace(" ", "").replace("\n", "")
             if not metric_raw or metric_raw == 'nan':
                 continue
                 
-            # 범용 지표명 매핑
             if '성공' in metric_raw and ('율' in metric_raw or '비' in metric_raw or '比' in metric_raw): 
                 metric = '성공율'
             elif '설치' in metric_raw: metric = '설치완료'
@@ -42,38 +42,40 @@ def parse_sales_data(uploaded_file):
             elif '접수' in metric_raw: metric = '접수'
             else: metric = metric_raw
             
-            # 열 단위로 날짜와 값 추출
+            # 날짜와 수치 매핑
             for col_idx in range(1, len(headers)):
-                date_raw = str(headers[col_idx])
+                date_raw = headers[col_idx]
+                if date_raw == 'nan' or not date_raw:
+                    continue
+                    
                 nums = re.findall(r'\d+', date_raw)
-                
-                # 날짜 형식이 숫자로 2개 이상(연, 월) 존재할 경우
+                # 날짜에 숫자 2개 이상(연도, 월)이 존재할 경우만 처리
                 if len(nums) >= 2:
                     yy, mm = int(nums[0]), int(nums)
                     yy = yy + 2000 if yy < 100 else yy
                     
-                    if 1 <= mm <= 12:
+                    if 2000 <= yy <= 2100 and 1 <= mm <= 12:
                         period_str = f"{yy:04d}-{mm:02d}-01"
                         val_raw = str(row.iloc[col_idx]).strip()
                         
-                        # 문자열 내 숫자, 소수점, 마이너스 기호만 추출
                         v_num = re.sub(r'[^\d.-]', '', val_raw)
                         try:
-                            val = float(v_num) if v_num else 0.0
+                            val = float(v_num) if v_num and v_num != '-' else 0.0
                         except:
                             val = 0.0
                             
                         melted_rows.append({'period': period_str, 'metric': metric, 'value': val})
                         
         if not melted_rows:
-            st.error("분석 가능한 유효 데이터(날짜 및 수치)를 추출하지 못했습니다.")
+            st.error("분석 가능한 데이터(날짜 및 수치)를 추출하지 못했습니다.")
             return None
             
-        # 4. 데이터프레임 변환 및 피벗 (중복값은 첫번째 값 우선)
+        # 4. 데이터프레임 변환 및 피벗 (중복값 방지)
         df_long = pd.DataFrame(melted_rows)
-        df_pivot = df_long.pivot_table(index='period', columns='metric', values='value', aggfunc='first').reset_index()
+        df_long = df_long.drop_duplicates(subset=['period', 'metric'])
+        df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
         
-        # 5. 필수 열 누락 방지 (KeyError 원천 차단)
+        # 5. 필수 열(컬럼) 누락 방지 (KeyError 원천 차단)
         essential_cols = ['접수', '컨택', '성공', '성공율', '설치완료']
         for c in essential_cols:
             if c not in df_pivot.columns:
@@ -83,13 +85,13 @@ def parse_sales_data(uploaded_file):
         df_pivot['period'] = pd.to_datetime(df_pivot['period'])
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
-        # 7. 성공율 수치 보정 (1보다 크면 퍼센트로 간주하여 나눗셈, 0일 경우 재계산)
+        # 7. 성공율 수치 자동 보정 (100% 기준)
         for i, row in df_pivot.iterrows():
             rate = row['성공율']
             if rate > 1.0:
                 df_pivot.at[i, '성공율'] = rate / 100.0
-            elif rate == 0.0 and row['접수'] > 0:
-                df_pivot.at[i, '성공율'] = row['성공'] / row['접수']
+            elif rate == 0.0 and row.get('접수', 0) > 0:
+                df_pivot.at[i, '성공율'] = row.get('성공', 0) / row.get('접수', 0)
                 
         return df_pivot
         
@@ -191,7 +193,6 @@ if sales_file:
             chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
             date_range = st.date_input("조회 기간 설정", value=(start_d, end_d), min_value=start_d, max_value=end_d)
             
-            # 날짜가 두 개 모두 선택되었을 때만 그래프 렌더링 실행
             if isinstance(date_range, tuple) and len(date_range) == 2:
                 start_p, end_p = pd.to_datetime(date_range[0]), pd.to_datetime(date_range)
                 chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
@@ -211,5 +212,3 @@ if sales_file:
         
         with st.expander("원본 데이터 테이블 보기 (시스템 추출본)"): 
             st.dataframe(df)
-    else:
-        st.error("데이터 처리에 실패했습니다. 파일 양식을 확인해주십시오.")
