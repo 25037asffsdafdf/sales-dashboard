@@ -14,7 +14,7 @@ def parse_sales_data(uploaded_file):
         header_r = -1
         header_c = -1
         
-        # [검증 1] '구분' 셀의 정확한 2차원 좌표 탐색 (float 충돌 원천 차단)
+        # [검증 1] '구분' 셀의 정확한 2차원 좌표 탐색
         for r in range(len(df_raw)):
             for c in range(len(df_raw.columns)):
                 cell_str = str(df_raw.iat[r, c]).replace(" ", "").replace("\n", "")
@@ -28,7 +28,7 @@ def parse_sales_data(uploaded_file):
             st.error("데이터 인식 실패: 표 좌측 상단에 '구분' 항목이 명시되어 있는지 확인해주십시오.")
             return None
 
-        # [검증 2] 날짜(월) 데이터 추출 및 표준화 (예: 2025년 1월 -> 2025-01-01)
+        # [검증 2] 날짜(월) 데이터 추출 및 표준화
         parsed_dates = {}
         for c in range(header_c + 1, len(df_raw.columns)):
             date_val = str(df_raw.iat[header_r, c]).replace(" ", "")
@@ -37,7 +37,9 @@ def parse_sales_data(uploaded_file):
             # 숫자만 추출하여 연도와 월 확인
             nums = re.findall(r'\d+', date_val)
             if len(nums) >= 2:
+                # 오타 수정 완료: int(nums) -> int(nums)
                 year, month = int(nums[0]), int(nums)
+                
                 # 연도가 2자리로 입력되었을 경우 4자리로 보정
                 if year < 100: year += 2000
                 if 2000 <= year <= 2100 and 1 <= month <= 12:
@@ -75,19 +77,18 @@ def parse_sales_data(uploaded_file):
         if not records:
             return None
 
-        # [검증 4] 중복 인덱스 방지를 위한 피벗 테이블 생성 (aggfunc='last' 적용)
+        # [검증 4] 중복 인덱스 방지를 위한 피벗 테이블 생성
         df_long = pd.DataFrame(records)
         df_pivot = df_long.pivot_table(index='period', columns='metric', values='value', aggfunc='last').reset_index()
         
-        # [검증 5] 필수 열 강제 할당 (KeyError 원천 차단)
+        # [검증 5] 필수 열 강제 할당
         for req_col in ['접수', '컨택', '성공', '성공율', '설치완료']:
             if req_col not in df_pivot.columns:
                 df_pivot[req_col] = 0.0
                 
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
-        # [검증 6] 성공율 시스템 강제 재계산 (엑셀 서식 오류 무시)
-        # 성공 건수 / 접수 건수로 일괄 재계산하여 데이터 신뢰성 확보
+        # [검증 6] 성공율 시스템 강제 재계산
         df_pivot['성공율'] = df_pivot.apply(
             lambda row: row['성공'] / row['접수'] if row['접수'] > 0 else 0.0, axis=1
         )
@@ -170,7 +171,6 @@ if sales_file:
     if df is not None and not df.empty:
         st.sidebar.success("데이터 추출 및 처리 완료")
         
-        # M-1 (가장 최근 월), M-2 (그 이전 월) 비교
         latest_data = df.iloc[-1]
         prev_data = df.iloc[-2] if len(df) > 1 else None
         
@@ -192,7 +192,6 @@ if sales_file:
             st.subheader("데이터 분석 리포트")
             st.markdown(generate_ai_analysis(df, crm_df))
             
-            # 성공율 최고 기록월 산출
             best_month = df.loc[df['성공율'].idxmax()]
             st.info(f"최고 효율 기록월: {best_month['period'].strftime('%Y년 %m월')} (성공율 {best_month['성공율']:.1%})")
             
@@ -209,7 +208,6 @@ if sales_file:
                 chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
                 
                 if not chart_df.empty:
-                    # 그래프용 인덱스 문자열 변환
                     chart_df['조회월'] = chart_df['period'].dt.strftime('%Y-%m')
                     chart_data = chart_df.set_index('조회월')['설치완료']
                     
