@@ -312,3 +312,4 @@ if sales_file:
         pass
 else:
     st.info("좌측 메뉴에서 데이터를 업로드하여 대시보드를 활성화해주십시오.")
+
