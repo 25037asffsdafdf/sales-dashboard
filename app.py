@@ -137,4 +137,113 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         
     if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별']):
         try:
-            stats = crm_df.groupby(
+            stats = crm_df.groupby(['연령대', '성별'])['성공여부'].apply(lambda x: (x == '성공').mean())
+            stats = stats.sort_values(ascending=False)
+            if not stats.empty:
+                best = stats.index[0]
+                best_rate = stats.iloc[0]
+                analysis_texts.append(
+                    f"- 주요 타겟 고객층: CRM 교차 분석 결과, {best[0]} {best[1]} 고객군의 성공율이 {best_rate:.1%}로 "
+                    f"가장 높게 측정되었습니다. 향후 마케팅 시 해당 타겟에 자원을 우선 배정할 것을 권장합니다."
+                )
+        except Exception:
+            pass
+            
+    return "\n\n".join(analysis_texts)
+
+# --- 대시보드 UI ---
+st.set_page_config(layout="wide", page_title="통합 매출 대시보드")
+st.title("매출 지표 종합 대시보드")
+st.markdown("---")
+
+st.sidebar.header("데이터 업로드")
+sales_file = st.sidebar.file_uploader("1. 매출 데이터 (필수)", type=["xlsx", "xls"])
+crm_file = st.sidebar.file_uploader("2. CRM 데이터 (선택)", type=["xlsx", "xls"])
+
+if sales_file:
+    df = parse_sales_data(sales_file)
+    crm_df = parse_crm_data(crm_file) if crm_file else None
+    
+    if df is not None and not df.empty:
+        st.sidebar.success("데이터 추출 및 처리 완료")
+        
+        # 월 선택 기능 추가 (가장 최근 실적이 있는 월이 기본값)
+        valid_periods = df[df['접수'] > 0]['period']
+        default_period = valid_periods.max() if not valid_periods.empty else df['period'].max()
+        
+        period_options = df['period'].dt.strftime('%Y년 %m월').tolist()
+        period_options.reverse() # 최신순 정렬
+        default_index = period_options.index(default_period.strftime('%Y년 %m월')) if default_period else 0
+        
+        selected_month_str = st.selectbox("조회 기준월 설정", options=period_options, index=default_index)
+        selected_period = pd.to_datetime(selected_month_str, format='%Y년 %m월')
+        
+        latest_data = df[df['period'] == selected_period].iloc[0]
+        
+        # 전월 데이터 추출
+        prev_period = selected_period - pd.DateOffset(months=1)
+        prev_data_df = df[df['period'] == prev_period]
+        prev_data = prev_data_df.iloc[0] if not prev_data_df.empty else None
+        
+        st.subheader(f"{latest_data['period'].strftime('%Y년 %m월')} 핵심 성과 지표 (전월 대비)")
+        kpi_cols = st.columns(4)
+        
+        for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
+            val = latest_data[metric]
+            delta = val - prev_data[metric] if prev_data is not None else 0
+            
+            if metric == '성공율': 
+                col.metric(metric, f"{val:.1%}", f"{delta*100:+.1f}%p")
+            else: 
+                col.metric(f"{metric} (건)", f"{val:,.0f}", f"{delta:+.0f}")
+                
+        st.markdown("<br>", unsafe_allow_html=True)
+        col1, col2 = st.columns([4, 6])
+        
+        with col1:
+            st.subheader("데이터 분석 리포트")
+            st.markdown(generate_ai_analysis(df, selected_period, crm_df))
+            
+            st.markdown("<br><b>연도별 최고 실적 현황 (성공율 기준)</b>", unsafe_allow_html=True)
+            df['year'] = df['period'].dt.year
+            df_valid_success = df[df['성공율'] > 0]
+            if not df_valid_success.empty:
+                best_per_year = df_valid_success.loc[df_valid_success.groupby('year')['성공율'].idxmax()]
+                
+                year_cols = st.columns(len(best_per_year))
+                for y_col, (_, row) in zip(year_cols, best_per_year.iterrows()):
+                    y_col.caption(f"{row['year']}년 최고 실적\n\n{row['period'].strftime('%m월')} (성공율 {row['성공율']:.1%})")
+
+        with col2:
+            st.subheader("설치 완료 건수 트렌드")
+            start_d = df['period'].min().date()
+            end_d = df['period'].max().date()
+            
+            chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
+            date_range = st.date_input("조회 기간 설정", value=(start_d, end_d), min_value=start_d, max_value=end_d)
+            
+            # Lengths must match 오류 방지를 위한 정확한 인덱싱 처리
+            if isinstance(date_range, tuple) and len(date_range) == 2:
+                start_p, end_p = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
+                chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
+                
+                if not chart_df.empty:
+                    chart_df['조회월'] = chart_df['period'].dt.strftime('%y-%m')
+                    chart_data = chart_df.set_index('조회월')['설치완료']
+                    
+                    if chart_type == "막대 그래프":
+                        st.bar_chart(chart_data)
+                    else:
+                        st.line_chart(chart_data)
+                else:
+                    st.warning("선택하신 기간 내에 유효한 데이터가 존재하지 않습니다.")
+            else:
+                st.info("시작일과 종료일을 모두 지정해주십시오.")
+        
+        with st.expander("데이터 원본 확인"): 
+            st.dataframe(df.drop(columns=['year']).style.format({
+                "성공율": "{:.2%}", "접수": "{:.0f}", "컨택": "{:.0f}", "성공": "{:.0f}", "설치완료": "{:.0f}"
+            }))
+            
+else:
+    st.info("좌측 메뉴에서 데이터를 업로드하여 대시보드를 활성화해주십시오.")
