@@ -31,8 +31,7 @@ def parse_sales_data(uploaded_file):
         header_rows = []
         anchor_c = -1
         
-        # [복구 완료] 아까 정상 작동했던 2차원(행/열) 전체 스캔 로직
-        # 파일 내 모든 '구분' 위치를 싹쓸이 탐색 (2025년 표, 2026년 표 모두 인식)
+        # 파일 내 모든 '구분' 위치 탐색 (2025년 표, 2026년 표 모두 인식)
         for r in range(len(df_raw)):
             for c in range(len(df_raw.columns)):
                 cell_val = str(df_raw.iat[r, c]).replace(" ", "").replace("\n", "")
@@ -47,13 +46,12 @@ def parse_sales_data(uploaded_file):
 
         records = []
         
-        # 인식된 모든 표(2025년, 2026년 등)를 순차적으로 처리
+        # 인식된 모든 표(2025년, 2026년 등) 순차 처리
         for i, h_idx in enumerate(header_rows):
             end_idx = header_rows[i+1] if i + 1 < len(header_rows) else len(df_raw)
             block = df_raw.iloc[h_idx:end_idx]
             
             dates = {}
-            # '구분' 우측의 날짜 열 추출 (202501, 2025년 1월 등 완벽 대응)
             for c in range(anchor_c + 1, len(df_raw.columns)):
                 d_val = str(block.iat[0, c]).replace(" ", "").replace(".0", "")
                 if not d_val: continue
@@ -64,11 +62,9 @@ def parse_sales_data(uploaded_file):
                 num_str = "".join(nums)
                 y, m = -1, -1
                 
-                # '202501' 처럼 6자리 숫자일 경우
                 if len(num_str) >= 6:
                     y = int(num_str[:4])
                     m = int(num_str[4:6])
-                # '2025년 1월' 처럼 숫자가 나뉘어 있을 경우
                 elif len(nums) >= 2:
                     y = int(nums[0])
                     m = int(nums)
@@ -97,15 +93,17 @@ def parse_sales_data(uploaded_file):
             st.error("데이터 추출 실패: 유효한 날짜 및 수치 데이터를 찾지 못했습니다.")
             return None
 
-        # 데이터 프레임화 및 병합 (중복 시 마지막 값 적용하여 인덱스 충돌 차단)
+        # 데이터 프레임화 및 병합 (중복 시 마지막 값 적용)
         df_long = pd.DataFrame(records)
         df_long = df_long.groupby(['period', 'metric'], as_index=False)['value'].last()
         df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
         
-        # 필수 지표 누락 방지 (KeyError 차단)
+        # 필수 지표 누락 방지 및 "완벽한 숫자형 변환"으로 표 출력 에러 차단
         for req in ['접수', '컨택', '성공', '성공율', '설치완료']:
             if req not in df_pivot.columns: 
                 df_pivot[req] = 0.0
+            else:
+                df_pivot[req] = pd.to_numeric(df_pivot[req], errors='coerce').fillna(0.0)
                 
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
@@ -202,7 +200,7 @@ if sales_file:
     if df is not None and not df.empty:
         st.sidebar.success("데이터 처리 완료")
         
-        # [추가 요청 반영] 월 선택 기능 (기본값: 접수 실적이 있는 가장 최근 월)
+        # 월 선택 기능 (기본값: 접수 실적이 있는 가장 최근 월)
         valid_periods = df[df['접수'] > 0]['period']
         default_period = valid_periods.max() if not valid_periods.empty else df['period'].max()
         
@@ -239,7 +237,7 @@ if sales_file:
             st.subheader("데이터 분석 리포트")
             st.markdown(generate_ai_analysis(df, selected_period, crm_df))
             
-            # [추가 요청 반영] 2025년, 2026년 각각 최고 실적 월 작게 표기
+            # 연도별 최고 실적 월 작게 표기
             st.markdown("<br><b>연도별 최고 실적 현황 (성공율 기준)</b>", unsafe_allow_html=True)
             df['year'] = df['period'].dt.year
             df_valid = df[df['성공율'] > 0]
@@ -274,9 +272,17 @@ if sales_file:
             else:
                 st.info("시작일과 종료일을 모두 지정해주십시오.")
         
-        with st.expander("데이터 원본 확인"): 
-            st.dataframe(df.drop(columns=['year']).style.format({
-                "성공율": "{:.2%}", "접수": "{:.0f}", "컨택": "{:.0f}", "성공": "{:.0f}", "설치완료": "{:.0f}"
-            }))
+        # [해결 완료] 스타일링 기능을 모두 빼고 오류 없이 안전한 형태로 원본 데이터 표출
+        with st.expander("데이터 원본 확인"):
+            # 깔끔하게 보여주기 위해 'year' 삭제 및 날짜 컬럼 보기 좋게 변환
+            display_df = df.drop(columns=['year'], errors='ignore').copy()
+            display_df['조회월'] = display_df['period'].dt.strftime('%Y-%m')
+            display_df = display_df.set_index('조회월').drop(columns=['period'])
+            
+            # 스타일 충돌 없는 안전한 기본 데이터프레임 렌더링
+            st.dataframe(display_df)
+            
+    else:
+        pass
 else:
     st.info("좌측 메뉴에서 데이터를 업로드하여 대시보드를 활성화해주십시오.")
