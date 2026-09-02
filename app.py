@@ -115,7 +115,7 @@ def parse_sales_data(uploaded_file):
         return None
 
 # =====================================================================
-# [3단계] CRM 데이터 및 종합 분석 리포트
+# [3단계] CRM 데이터 및 종합 분석 리포트 (전월 대비로 로직 변경)
 # =====================================================================
 def parse_crm_data(uploaded_file):
     try:
@@ -147,19 +147,24 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     latest = current_data.iloc[0]
     analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 성과 분석 요약"]
     
-    last_year_dt = latest['period'].replace(year=latest['period'].year - 1)
-    ly_data = df[df['period'] == last_year_dt]
+    # [수정] 전년 동월이 아닌 '전월' 데이터로 추출
+    prev_month_dt = latest['period'] - pd.DateOffset(months=1)
+    prev_data_df = df[df['period'] == prev_month_dt]
     
-    if not ly_data.empty:
-        ly = ly_data.iloc[0]
-        rec_diff = latest['접수'] - ly['접수']
-        rate_diff = (latest['성공율'] - ly['성공율']) * 100
+    if not prev_data_df.empty:
+        prev = prev_data_df.iloc[0]
+        rec_diff = latest['접수'] - prev['접수']
+        rate_diff = (latest['성공율'] - prev['성공율']) * 100
         
         trend_rec = "증가" if rec_diff > 0 else "감소"
+        
+        # [수정] 전월 대비 증감율로 문구 및 로직 완전 변경
         analysis_texts.append(
-            f"- 전년 동월 대비 성과: 접수 건수는 {abs(rec_diff):,.0f}건 {trend_rec}하였으며, "
+            f"- 전월 대비 성과: 접수 건수는 {abs(rec_diff):,.0f}건 {trend_rec}하였으며, "
             f"성공율은 {rate_diff:+.1f}%p 변동하였습니다."
         )
+    else:
+        analysis_texts.append("- 이전 달의 데이터가 존재하지 않아 전월 대비 성과를 산출할 수 없습니다.")
         
     if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별']):
         try:
@@ -180,8 +185,9 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
 # =====================================================================
 # [4단계] 대시보드 UI 구성
 # =====================================================================
-st.set_page_config(layout="wide", page_title="통합 매출 대시보드")
-st.title("매출 지표 종합 대시보드")
+# [수정] 대시보드 공식 명칭 변경
+st.set_page_config(layout="wide", page_title="현대렌탈케어 고객만족센터 매출관리 대시보드")
+st.title("현대렌탈케어 고객만족센터 매출관리 대시보드")
 st.markdown("---")
 
 st.sidebar.header("데이터 업로드")
@@ -244,21 +250,33 @@ if sales_file:
             
             vis_col1, vis_col2 = st.columns(2)
             with vis_col1:
-                target_metric = st.selectbox("분석 지표 선택", ['설치완료', '접수', '컨택', '성공', '성공율'])
+                target_metric = st.selectbox("분석 지표 커스터마이징", ['설치완료', '접수', '컨택', '성공', '성공율'])
             with vis_col2:
                 chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
                 
-            unique_periods = df['period'].drop_duplicates().sort_values()
-            asc_period_options = unique_periods.dt.strftime('%Y년 %m월').tolist()
+            # [수정] 기간 설정을 위한 연도, 월 리스트 추출
+            available_years = sorted(df['period'].dt.year.unique().tolist())
+            months = list(range(1, 13))
             
-            sc1, sc2 = st.columns(2)
+            start_d = df['period'].min()
+            end_d = df['period'].max()
+            
+            st.markdown("**차트 조회 기간 설정**")
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            
             with sc1:
-                start_month_str = st.selectbox("조회 시작 월", options=asc_period_options, index=0)
+                start_y = st.selectbox("시작 연도", options=available_years, index=0, format_func=lambda x: f"{x}년")
             with sc2:
-                end_month_str = st.selectbox("조회 종료 월", options=asc_period_options, index=len(asc_period_options)-1)
+                start_m_idx = months.index(start_d.month) if start_y == start_d.year else 0
+                start_m = st.selectbox("시작 월", options=months, index=start_m_idx, format_func=lambda x: f"{x}월")
+            with sc3:
+                end_y = st.selectbox("종료 연도", options=available_years, index=len(available_years)-1, format_func=lambda x: f"{x}년")
+            with sc4:
+                end_m_idx = months.index(end_d.month) if end_y == end_d.year else 11
+                end_m = st.selectbox("종료 월", options=months, index=end_m_idx, format_func=lambda x: f"{x}월")
                 
-            start_p = pd.to_datetime(start_month_str, format='%Y년 %m월')
-            end_p = pd.to_datetime(end_month_str, format='%Y년 %m월')
+            start_p = pd.to_datetime(f"{start_y}-{start_m}-01")
+            end_p = pd.to_datetime(f"{end_y}-{end_m}-01")
             
             if start_p > end_p:
                 st.warning("시작 월이 종료 월보다 늦을 수 없습니다. 기간을 다시 확인해주십시오.")
@@ -267,23 +285,19 @@ if sales_file:
                 chart_df = chart_df[chart_df[target_metric] > 0]
                 
                 if not chart_df.empty:
-                    # [개선 1] 연도와 월이 모두 표기되도록 복구 (예: 25년 1월)
                     chart_df['조회월'] = chart_df['period'].dt.strftime('%y년 ') + chart_df['period'].dt.month.astype(str) + '월'
                     
                     if target_metric == '성공율':
                         chart_df[target_metric] = chart_df[target_metric] * 100
 
-                    # ---------------------------------------------------------
-                    # [개선 2] 빅테크 스타일 고급 시각화: 수치를 상단에 완벽히 고정
-                    # ---------------------------------------------------------
                     if chart_type == "막대 그래프":
                         fig = px.bar(chart_df, x='조회월', y=target_metric, text=target_metric)
                         fig.update_traces(
                             texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}',
-                            textposition='outside', # 막대 위 바깥쪽 고정
+                            textposition='outside', 
                             marker_color='#1E88E5', 
                             textfont_size=12,
-                            cliponaxis=False        # 라벨이 차트 바깥으로 나가도 잘리지 않음
+                            cliponaxis=False        
                         )
                     else:
                         fig = px.line(chart_df, x='조회월', y=target_metric, markers=True, text=target_metric)
@@ -291,12 +305,11 @@ if sales_file:
                             line=dict(width=3, color='#1E88E5'), 
                             marker=dict(size=8, color='#0D47A1'),
                             texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}',
-                            textposition="top center", # 꺾은선 점 바로 위 중앙 고정
+                            textposition="top center",
                             textfont_size=12,
                             cliponaxis=False
                         )
                         
-                    # Y축 상단 여유 공간 확보 (숫자가 잘리는 현상 방지)
                     max_val = chart_df[target_metric].max()
                     y_max_range = max_val * 1.15 if max_val > 0 else 1.0
 
@@ -305,10 +318,10 @@ if sales_file:
                         paper_bgcolor='rgba(0,0,0,0)',
                         xaxis_title="",
                         yaxis_title="",  
-                        margin=dict(l=10, r=10, t=40, b=10),
+                        margin=dict(l=10, r=10, t=70, b=10), # [수정] 상단 마진을 70으로 넓혀 텍스트 짤림 완전 방지
                         xaxis=dict(
                             showgrid=False, 
-                            tickangle=-45,          # [개선 3] 텍스트가 겹치지 않게 -45도 빗각(대각선) 배치
+                            tickangle=-45,
                             type='category',
                             categoryorder='array',
                             categoryarray=chart_df['조회월']
@@ -316,13 +329,13 @@ if sales_file:
                         yaxis=dict(
                             showgrid=True, 
                             gridcolor='#E0E0E0',
-                            range=[0, y_max_range]  # Y축 상단 여유공간 지정
+                            range=[0, y_max_range]
                         ),
                         annotations=[dict(
-                            x=0, y=1.1, xref='paper', yref='paper',
-                            text=f"{target_metric} {'(%)' if target_metric == '성공율' else '(건)'}", 
+                            x=0, y=1.15, xref='paper', yref='paper', # [수정] Y위치 1.15로 올려서 안전하게 표기
+                            text=f"<b>{target_metric}</b> {'(%)' if target_metric == '성공율' else '(건)'}", 
                             showarrow=False,
-                            font=dict(size=13, color='gray'),
+                            font=dict(size=14, color='gray'),
                             xanchor='left', yanchor='bottom'
                         )]
                     )
