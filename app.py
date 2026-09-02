@@ -4,7 +4,7 @@ from datetime import datetime
 import re
 import traceback
 
-# --- 1. 철저한 예외 처리가 적용된 데이터 파싱 ---
+# --- 1. 무결성 스캔 및 예외 처리 데이터 파싱 ---
 def parse_sales_data(uploaded_file):
     try:
         df_raw = pd.read_excel(uploaded_file, header=None)
@@ -13,57 +13,73 @@ def parse_sales_data(uploaded_file):
         header_r = -1
         header_c = -1
         
-        # '구분' 좌표 찾기
-        for r in range(len(df_raw)):
-            for c in range(len(df_raw.columns)):
+        # [방어 1] '구분' 좌표 찾기
+        for r in range(min(30, len(df_raw))):
+            for c in range(min(20, len(df_raw.columns))):
                 cell_str = str(df_raw.iat[r, c]).replace(" ", "").replace("\n", "")
-                if cell_str == "구분":
+                if "구분" in cell_str:
                     header_r = r
                     header_c = c
                     break
             if header_r != -1: break
             
         if header_r == -1:
-            st.error("데이터 인식 실패: 표 좌측 상단에 '구분' 항목을 찾을 수 없습니다.")
+            st.error("데이터 인식 실패: 표 상단에 '구분' 항목을 찾을 수 없습니다.")
             return None
 
         parsed_dates = {}
-        # 열을 이동하며 날짜 데이터 추출
+        last_seen_year = datetime.now().year
+        
+        # [방어 2] 날짜 데이터 레이더 스캔 (구분 셀 위아래 2줄까지 전수조사)
         for c in range(header_c + 1, len(df_raw.columns)):
-            date_val = str(df_raw.iat[header_r, c]).replace(" ", "")
-            if not date_val or date_val == 'nan': continue
+            # 2-1. 연도('년') 먼저 탐색 (셀 병합으로 인해 연도만 있는 경우 대비)
+            for r_check in range(max(0, header_r - 2), min(len(df_raw), header_r + 2)):
+                val_str = str(df_raw.iat[r_check, c]).replace(" ", "")
+                if "년" in val_str and "월" not in val_str:
+                    y_match = re.findall(r'\d+', val_str)
+                    if y_match:
+                        y_cand = int(y_match[0])
+                        if y_cand < 100: y_cand += 2000
+                        if 2000 <= y_cand <= 2100:
+                            last_seen_year = y_cand
             
-            nums = re.findall(r'\d+', date_val)
-            
-            # 숫자(연/월)가 2개 이상 발견되었을 경우
-            if len(nums) >= 2:
-                try:
-                    # 문제의 원인이었던 오타를 확실하게 수정했습니다 (nums 적용)
-                    y_val = int(nums[0])
-                    m_val = int(nums)
+            # 2-2. 월('월') 데이터 탐색 및 조합
+            for r_check in range(max(0, header_r - 2), min(len(df_raw), header_r + 2)):
+                val = df_raw.iat[r_check, c]
+                if isinstance(val, datetime):
+                    parsed_dates[c] = pd.Timestamp(val.year, val.month, 1)
+                    last_seen_year = val.year
+                    break
                     
-                    if y_val < 100: y_val += 2000
-                    if 2000 <= y_val <= 2100 and 1 <= m_val <= 12:
-                        parsed_dates[c] = pd.Timestamp(y_val, m_val, 1)
-                except Exception:
-                    continue 
-            # 숫자가 1개(월)만 있을 경우
-            elif len(nums) == 1:
-                try:
-                    m_val = int(nums[0])
-                    if 1 <= m_val <= 12:
-                        parsed_dates[c] = pd.Timestamp(datetime.now().year, m_val, 1)
-                except Exception:
-                    continue
+                val_str = str(val).replace(" ", "")
+                if not val_str: continue
+                
+                nums = re.findall(r'\d+', val_str)
+                # '2025년 1월', '25.1' 등 연월이 같이 있는 경우
+                if len(nums) >= 2 and ("월" in val_str or "." in val_str or "-" in val_str):
+                    y = int(nums[0])
+                    m = int(nums)
+                    if y < 100: y += 2000
+                    if 2000 <= y <= 2100 and 1 <= m <= 12:
+                        parsed_dates[c] = pd.Timestamp(y, m, 1)
+                        last_seen_year = y
+                        break
+                # '1월', '2월' 등 월만 있는 경우 (앞서 찾은 연도와 결합)
+                elif len(nums) == 1 and "월" in val_str:
+                    m = int(nums[0])
+                    if 1 <= m <= 12:
+                        parsed_dates[c] = pd.Timestamp(last_seen_year, m, 1)
+                        break
 
         if not parsed_dates:
-            st.error("데이터 인식 실패: 날짜(연/월) 데이터를 인식하지 못했습니다.")
+            st.error("데이터 인식 실패: 날짜(연/월) 데이터를 추출하지 못했습니다. 표 형식을 확인해주세요.")
             return None
 
+        # [방어 3] 지표 및 데이터 매핑
         records = []
         for r in range(header_r + 1, len(df_raw)):
             metric_raw = str(df_raw.iat[r, header_c]).replace(" ", "").replace("\n", "")
-            if not metric_raw or metric_raw == 'nan': continue
+            if not metric_raw: continue
             
             if '접수' in metric_raw and ('비' in metric_raw or '比' in metric_raw or '율' in metric_raw): metric = '성공율'
             elif '성공' in metric_raw and '율' in metric_raw: metric = '성공율'
@@ -76,10 +92,12 @@ def parse_sales_data(uploaded_file):
             for c, period_dt in parsed_dates.items():
                 val_raw = str(df_raw.iat[r, c]).replace(",", "").strip()
                 v_num = re.sub(r'[^\d.-]', '', val_raw)
-                try:
-                    val = float(v_num) if v_num and v_num != '-' else 0.0
-                except Exception:
+                # 하이픈, 마침표 등 특수기호만 있을 경우 0.0 처리
+                if v_num in ['', '-', '.']:
                     val = 0.0
+                else:
+                    try: val = float(v_num)
+                    except: val = 0.0
                 
                 records.append({'period': period_dt, 'metric': metric, 'value': val})
 
@@ -89,13 +107,14 @@ def parse_sales_data(uploaded_file):
         df_long = pd.DataFrame(records)
         df_pivot = df_long.pivot_table(index='period', columns='metric', values='value', aggfunc='last').reset_index()
         
+        # 필수 지표 강제 할당 (KeyError 차단)
         for req_col in ['접수', '컨택', '성공', '성공율', '설치완료']:
             if req_col not in df_pivot.columns:
                 df_pivot[req_col] = 0.0
                 
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
-        # 엑셀의 성공율 서식 오류를 무시하고 시스템에서 강제 계산
+        # 성공율 시스템 강제 계산 (엑셀 서식 파괴 대비)
         df_pivot['성공율'] = df_pivot.apply(
             lambda row: row['성공'] / row['접수'] if row.get('접수', 0) > 0 else 0.0, axis=1
         )
