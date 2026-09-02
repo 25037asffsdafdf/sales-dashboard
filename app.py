@@ -22,7 +22,7 @@ def standardize_metric_name(raw_name):
     return clean_name
 
 # =====================================================================
-# [2단계] 핵심 매출 데이터 파싱 
+# [2단계] 핵심 매출 데이터 파싱
 # =====================================================================
 def parse_sales_data(uploaded_file):
     try:
@@ -178,7 +178,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     return "\n\n".join(analysis_texts)
 
 # =====================================================================
-# [4단계] 대시보드 UI 구성 (차트 디자인 가독성 극대화)
+# [4단계] 대시보드 UI 구성
 # =====================================================================
 st.set_page_config(layout="wide", page_title="통합 매출 대시보드")
 st.title("매출 지표 종합 대시보드")
@@ -264,47 +264,60 @@ if sales_file:
                 st.warning("시작 월이 종료 월보다 늦을 수 없습니다. 기간을 다시 확인해주십시오.")
             else:
                 chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
-                
-                # 수치가 0인 데이터(미입력된 미래의 달 등)는 그래프에서 강제 제외
                 chart_df = chart_df[chart_df[target_metric] > 0]
                 
                 if not chart_df.empty:
-                    # [개선 1] 가독성을 위해 X축 라벨을 '1월', '2월' 형태로 짧게 축약
-                    chart_df['조회월'] = chart_df['period'].dt.month.astype(str) + '월'
+                    # [개선 1] 연도와 월이 모두 표기되도록 복구 (예: 25년 1월)
+                    chart_df['조회월'] = chart_df['period'].dt.strftime('%y년 ') + chart_df['period'].dt.month.astype(str) + '월'
                     
                     if target_metric == '성공율':
                         chart_df[target_metric] = chart_df[target_metric] * 100
 
-                    # Plotly를 활용한 고급 인터랙티브 차트 렌더링
+                    # ---------------------------------------------------------
+                    # [개선 2] 빅테크 스타일 고급 시각화: 수치를 상단에 완벽히 고정
+                    # ---------------------------------------------------------
                     if chart_type == "막대 그래프":
-                        fig = px.bar(chart_df, x='조회월', y=target_metric, 
-                                     text_auto='.1f' if target_metric == '성공율' else '.0f')
-                        fig.update_traces(marker_color='#1E88E5', textposition='outside', textfont_size=12)
+                        fig = px.bar(chart_df, x='조회월', y=target_metric, text=target_metric)
+                        fig.update_traces(
+                            texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}',
+                            textposition='outside', # 막대 위 바깥쪽 고정
+                            marker_color='#1E88E5', 
+                            textfont_size=12,
+                            cliponaxis=False        # 라벨이 차트 바깥으로 나가도 잘리지 않음
+                        )
                     else:
                         fig = px.line(chart_df, x='조회월', y=target_metric, markers=True, text=target_metric)
                         fig.update_traces(
                             line=dict(width=3, color='#1E88E5'), 
                             marker=dict(size=8, color='#0D47A1'),
-                            texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:.0f}',
-                            textposition="top center"
+                            texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}',
+                            textposition="top center", # 꺾은선 점 바로 위 중앙 고정
+                            textfont_size=12,
+                            cliponaxis=False
                         )
                         
-                    # [개선 2] 레이아웃 최적화: 배경 투명, 눈금 간격 설정, 텍스트 각도 0도(가로) 고정
+                    # Y축 상단 여유 공간 확보 (숫자가 잘리는 현상 방지)
+                    max_val = chart_df[target_metric].max()
+                    y_max_range = max_val * 1.15 if max_val > 0 else 1.0
+
                     fig.update_layout(
                         plot_bgcolor='rgba(0,0,0,0)',
                         paper_bgcolor='rgba(0,0,0,0)',
-                        xaxis_title="조회 월",
+                        xaxis_title="",
                         yaxis_title="",  
                         margin=dict(l=10, r=10, t=40, b=10),
                         xaxis=dict(
                             showgrid=False, 
-                            tickangle=0,            # 텍스트가 대각선으로 눕는 현상 원천 차단
-                            type='category',        # 데이터 간격을 일정하게 유지
-                            categoryorder='array',  # 입력된 순서대로 정렬
+                            tickangle=-45,          # [개선 3] 텍스트가 겹치지 않게 -45도 빗각(대각선) 배치
+                            type='category',
+                            categoryorder='array',
                             categoryarray=chart_df['조회월']
                         ),
-                        yaxis=dict(showgrid=True, gridcolor='#E0E0E0'),
-                        # 차트 좌측 상단에 지표 이름(예: 설치완료 (건)) 작게 표기
+                        yaxis=dict(
+                            showgrid=True, 
+                            gridcolor='#E0E0E0',
+                            range=[0, y_max_range]  # Y축 상단 여유공간 지정
+                        ),
                         annotations=[dict(
                             x=0, y=1.1, xref='paper', yref='paper',
                             text=f"{target_metric} {'(%)' if target_metric == '성공율' else '(건)'}", 
@@ -321,7 +334,7 @@ if sales_file:
                 else:
                     st.warning("선택하신 기간 내에 유효한(0보다 큰) 수치 데이터가 존재하지 않습니다.")
         
-        with st.expander("데이터 원본 확인"): 
+        with st.expander("데이터 원본 확인"):
             display_df = df.drop(columns=['year'], errors='ignore').copy()
             display_df['조회월'] = display_df['period'].dt.strftime('%Y-%m')
             display_df = display_df.set_index('조회월').drop(columns=['period'])
@@ -330,6 +343,6 @@ if sales_file:
             }))
             
     else:
-        st.error("데이터 처리 중 문제가 발생했습니다. 파일 형식을 다시 확인해주십시오.")
+        pass
 else:
     st.info("좌측 메뉴에서 데이터를 업로드하여 대시보드를 활성화해주십시오.")
