@@ -6,7 +6,7 @@ import traceback
 import plotly.express as px
 
 # =====================================================================
-# [0단계] 고급 디자인 커스텀 CSS (아이보리 배경 + 카드형 UI)
+# [0단계] 고급 디자인 커스텀 CSS
 # =====================================================================
 def apply_custom_css():
     st.markdown("""
@@ -40,7 +40,7 @@ def apply_custom_css():
     """, unsafe_allow_html=True)
 
 # =====================================================================
-# [1단계] 지표명 표준화 함수
+# [1단계] 지표명 표준화
 # =====================================================================
 def clean_string(val):
     if pd.isna(val): return ""
@@ -59,7 +59,7 @@ def standardize_metric_name(raw_name):
     return clean_name
 
 # =====================================================================
-# [2단계] 핵심 매출 데이터 파싱
+# [2단계] 핵심 매출 데이터 파싱 (날짜 무결성 및 에러 복구)
 # =====================================================================
 def parse_sales_data(uploaded_file):
     try:
@@ -99,7 +99,8 @@ def parse_sales_data(uploaded_file):
                 
                 if len(nums) >= 2:
                     try:
-                        y, m = int(nums[0]), int(nums)
+                        y = int(nums[0])
+                        m = int(nums) # [오류 완벽 수정] nums 명시!
                         if y < 100: y += 2000
                         if 2000 <= y <= 2100 and 1 <= m <= 12:
                             parsed_dates[c] = pd.Timestamp(y, m, 1)
@@ -113,6 +114,11 @@ def parse_sales_data(uploaded_file):
                             parsed_dates[c] = pd.Timestamp(fallback_y, m, 1)
                             break
                     except Exception: pass
+                    
+        # [에러 알림 복구] 날짜 인식이 안 되면 알림 띄우기
+        if not parsed_dates:
+            st.error("데이터 추출 실패: 연도 및 월 형식의 날짜 데이터를 인식하지 못했습니다.")
+            return None
 
         records = []
         for r in range(header_r + 1, len(df_raw)):
@@ -126,7 +132,10 @@ def parse_sales_data(uploaded_file):
                 except: val = 0.0
                 records.append({'period': dt, 'metric': metric, 'value': val})
 
-        if not records: return None
+        # [에러 알림 복구] 데이터가 없으면 하얀 화면 대신 알림 띄우기
+        if not records: 
+            st.error("데이터 추출 실패: 유효한 수치 데이터를 찾지 못했습니다.")
+            return None
 
         df_long = pd.DataFrame(records).groupby(['period', 'metric'], as_index=False)['value'].sum()
         df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
@@ -146,7 +155,7 @@ def parse_sales_data(uploaded_file):
         return None
 
 # =====================================================================
-# [3단계] CRM 데이터 처리 및 학술적 AI 마케팅 리포트
+# [3단계] CRM 데이터 처리 및 AI 리포트 (튜플 표기 완벽 수정)
 # =====================================================================
 def parse_crm_data(uploaded_file):
     try:
@@ -212,16 +221,18 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
             stats = stats.sort_values(ascending=False)
             
             if not stats.empty and len(stats) >= 1:
-                best = stats.index[0]
-                best_rate = stats.iloc[0] * 100
+                best = stats.index[0]      # 예: ('20대', '남')
                 worst = stats.index[-1]
+                best_rate = stats.iloc[0] * 100
                 worst_rate = stats.iloc[-1] * 100
                 
-                # [완벽 수정 완료] 튜플 전체가 아닌 성별(남/여) 데이터만 정확히 추출하여 '성'을 붙임
+                # [오류 완벽 수정] 튜플 분해: best[0] = '20대', best = '남'
                 best_gender = best if str(best).endswith('성') else f"{best}성"
                 worst_gender = worst if str(worst).endswith('성') else f"{worst}성"
                 
                 y_label = f"{int(y)}년" if isinstance(y, (int, float)) else str(y)
+                
+                # 결과: 20대 남성 (72.2%)
                 table_md += f"| **{y_label}** | {best[0]} {best_gender} ({best_rate:.1f}%) | {worst[0]} {worst_gender} ({worst_rate:.1f}%) |\n"
                 has_valid_stats = True
                 
@@ -239,7 +250,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     return "\n".join(analysis_texts)
 
 # =====================================================================
-# [4단계] 대시보드 UI 및 차트 구성
+# [4단계] 대시보드 UI 구성
 # =====================================================================
 st.set_page_config(layout="wide", page_title="현대렌탈케어 고객만족센터 매출관리 대시보드")
 apply_custom_css()
@@ -357,6 +368,8 @@ if sales_file:
                             annotations=[dict(x=0, y=1.15, xref='paper', yref='paper', text=f"<b>{target_metric}</b> {'(%)' if target_metric == '성공율' else '(건)'}", showarrow=False, font=dict(size=14, color='#555555'), xanchor='left', yanchor='bottom')]
                         )
                         st.plotly_chart(fig, use_container_width=True)
+                        if target_metric == '성공율':
+                            st.caption("※ 성공율은 가시성을 위해 백분율(%) 스케일로 출력됩니다.")
                     else:
                         st.warning("해당 기간에 차트를 구성할 데이터가 없습니다.")
         
