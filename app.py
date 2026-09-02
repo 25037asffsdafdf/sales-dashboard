@@ -48,7 +48,7 @@ def parse_sales_data(uploaded_file):
                     elif "년" in col_name and "월" in col_name:
                         nums = re.findall(r'\d+', col_name)
                         if len(nums) >= 2:
-                            period = pd.to_datetime(f"{nums[0]}{int(nums[1]):02d}", format='%Y%m')
+                            period = pd.to_datetime(f"{nums[0]}{int(nums):02d}", format='%Y%m')
                     
                     if period:
                         val = row[col_idx]
@@ -65,6 +65,7 @@ def parse_sales_data(uploaded_file):
             return None
             
         df_long = pd.DataFrame(all_data)
+        
         # 중복 데이터 발생 시 마지막 값 우선 반영
         df_long = df_long.groupby(['period', 'metric'], as_index=False)['value'].last()
         df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
@@ -143,7 +144,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 best = stats.index[0]
                 best_rate = stats.iloc[0]
                 analysis_texts.append(
-                    f"- 주요 타겟 고객층: CRM 교차 분석 결과, {best[0]} {best[1]} 고객군의 성공율이 {best_rate:.1%}로 "
+                    f"- 주요 타겟 고객층: CRM 교차 분석 결과, {best[0]} {best} 고객군의 성공율이 {best_rate:.1%}로 "
                     f"가장 높게 측정되었습니다. 향후 마케팅 시 해당 타겟에 자원을 우선 배정할 것을 권장합니다."
                 )
         except Exception:
@@ -224,7 +225,7 @@ if sales_file:
             
             # Lengths must match 오류 방지를 위한 정확한 인덱싱 처리
             if isinstance(date_range, tuple) and len(date_range) == 2:
-                start_p, end_p = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
+                start_p, end_p = pd.to_datetime(date_range[0]), pd.to_datetime(date_range)
                 chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
                 
                 if not chart_df.empty:
