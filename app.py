@@ -21,7 +21,7 @@ def standardize_metric_name(raw_name):
     return clean_name
 
 # =====================================================================
-# [2단계] 핵심 매출 데이터 파싱 (다중 테이블 완벽 호환)
+# [2단계] 핵심 매출 데이터 파싱
 # =====================================================================
 def parse_sales_data(uploaded_file):
     try:
@@ -239,10 +239,15 @@ if sales_file:
                     y_col.caption(f"🏆 {row['year']}년 최고 실적\n\n{row['period'].strftime('%m월')} (성공율 {row['성공율']:.1%})")
 
         with col2:
-            st.subheader("설치 완료 건수 트렌드")
-            chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
+            st.subheader("지표별 트렌드 분석 (시각화)")
             
-            # [수정 완료] 에러를 유발하는 달력(Date Input) 대신 안전한 드롭다운(월 선택기) 적용
+            # [기능 2] 시각화 커스터마이징 패널 추가
+            vis_col1, vis_col2 = st.columns(2)
+            with vis_col1:
+                target_metric = st.selectbox("분석 지표 선택", ['설치완료', '접수', '컨택', '성공', '성공율'])
+            with vis_col2:
+                chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
+                
             unique_periods = df['period'].drop_duplicates().sort_values()
             asc_period_options = unique_periods.dt.strftime('%Y년 %m월').tolist()
             
@@ -260,13 +265,23 @@ if sales_file:
             else:
                 chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
                 if not chart_df.empty:
-                    chart_df['조회월'] = chart_df['period'].dt.strftime('%Y-%m')
-                    chart_data = chart_df.set_index('조회월')['설치완료']
+                    # [기능 1] X축 기간을 '25년 1월' 처럼 짧고 직관적인 형태로 변경
+                    chart_df['조회월'] = chart_df['period'].dt.strftime('%y년 ') + chart_df['period'].dt.month.astype(str) + '월'
+                    
+                    # [기능 3] 지표 선택에 따른 차트 데이터 세팅
+                    chart_data = chart_df.set_index('조회월')[target_metric]
+                    
+                    # 성공율 선택 시 0~100 스케일로 보기 좋게 뻥튀기 변환
+                    if target_metric == '성공율':
+                        chart_data = chart_data * 100
                     
                     if chart_type == "막대 그래프":
                         st.bar_chart(chart_data)
                     else:
                         st.line_chart(chart_data)
+                        
+                    if target_metric == '성공율':
+                        st.caption("※ 성공율은 가시성을 위해 백분율(%) 단위의 0~100 스케일로 출력됩니다.")
                 else:
                     st.warning("선택하신 기간 내에 데이터가 존재하지 않습니다.")
         
