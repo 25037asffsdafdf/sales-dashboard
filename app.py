@@ -7,7 +7,6 @@ import traceback
 # --- 1. 무결성 확보 데이터 파싱 ---
 def parse_sales_data(uploaded_file):
     try:
-        # 모든 셀을 문자열로 다루기 위해 결측치 사전 처리
         df_raw = pd.read_excel(uploaded_file, header=None)
         df_raw = df_raw.fillna("")
 
@@ -37,13 +36,18 @@ def parse_sales_data(uploaded_file):
             # 숫자만 추출하여 연도와 월 확인
             nums = re.findall(r'\d+', date_val)
             if len(nums) >= 2:
-                # 오타 수정 완료: int(nums) -> int(nums)
+                # !!! 치명적이었던 오타 수정 완료 !!! (nums -> nums)
                 year, month = int(nums[0]), int(nums)
                 
                 # 연도가 2자리로 입력되었을 경우 4자리로 보정
                 if year < 100: year += 2000
                 if 2000 <= year <= 2100 and 1 <= month <= 12:
                     parsed_dates[c] = pd.Timestamp(year, month, 1)
+            elif len(nums) == 1:
+                # 연도 없이 '1월' 처럼 월만 적혀있을 경우
+                month = int(nums[0])
+                if 1 <= month <= 12:
+                    parsed_dates[c] = pd.Timestamp(datetime.now().year, month, 1)
 
         if not parsed_dates:
             st.error("데이터 인식 실패: '구분' 우측열에 위치한 날짜(연/월) 데이터를 인식하지 못했습니다.")
