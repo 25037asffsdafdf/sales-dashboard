@@ -4,7 +4,6 @@ from datetime import datetime
 import re
 import traceback
 import plotly.express as px
-import plotly.graph_objects as go
 
 # =====================================================================
 # [1단계] 지표명 표준화 함수
@@ -67,7 +66,7 @@ def parse_sales_data(uploaded_file):
                     m = int(num_str[4:6])
                 elif len(nums) >= 2:
                     y = int(nums[0])
-                    m = int(nums)
+                    m = int(nums[1])
                 
                 if y != -1 and m != -1:
                     if y < 100: y += 2000
@@ -121,7 +120,7 @@ def parse_sales_data(uploaded_file):
 def parse_crm_data(uploaded_file):
     try:
         crm_df = pd.read_excel(uploaded_file)
-        crm_df.columns = [str(col).replace(" ", "").replace("\n", "") for col in crm_df.columns]
+        crm_df.columns = [str(col).strip().replace(" ", "") for col in crm_df.columns]
         
         if '생년월일' in crm_df.columns:
             crm_df['생년월일'] = pd.to_datetime(crm_df['생년월일'], errors='coerce')
@@ -146,7 +145,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         return "해당 월의 데이터가 존재하지 않습니다."
         
     latest = current_data.iloc[0]
-    analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 성과 분석 요약"]
+    analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 실적 종합 리포트"]
     
     last_year_dt = latest['period'].replace(year=latest['period'].year - 1)
     ly_data = df[df['period'] == last_year_dt]
@@ -158,7 +157,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         
         trend_rec = "증가" if rec_diff > 0 else "감소"
         analysis_texts.append(
-            f"- 전년 동월 대비 성과: 접수 건수는 {abs(rec_diff):,.0f}건 {trend_rec}하였으며, "
+            f"- 전년 동월 대비 접수 건수는 {abs(rec_diff):,.0f}건 {trend_rec}하였으며, "
             f"성공율은 {rate_diff:+.1f}%p 변동하였습니다."
         )
         
@@ -170,7 +169,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 best = stats.index[0]
                 best_rate = stats.iloc[0]
                 analysis_texts.append(
-                    f"- 주요 타겟 고객층: CRM 분석 결과, {best[0]} {best} 고객군의 성공율이 {best_rate:.1%}로 "
+                    f"- 주요 타겟 고객층: CRM 분석 결과, {best[0]} {best[1]} 고객군의 성공율이 {best_rate:.1%}로 "
                     f"가장 높게 측정되었습니다. 향후 마케팅 시 해당 타겟에 자원을 우선 배정할 것을 권장합니다."
                 )
         except:
@@ -194,7 +193,7 @@ if sales_file:
     crm_df = parse_crm_data(crm_file) if crm_file else None
     
     if df is not None and not df.empty:
-        st.sidebar.success("데이터 처리 완료")
+        st.sidebar.success("데이터 추출 및 처리 완료")
         
         valid_periods = df[df['접수'] > 0]['period']
         default_period = valid_periods.max() if not valid_periods.empty else df['period'].max()
@@ -207,14 +206,12 @@ if sales_file:
         selected_period = pd.to_datetime(selected_month_str, format='%Y년 %m월')
         
         latest_data = df[df['period'] == selected_period].iloc[0]
-        
         prev_period = selected_period - pd.DateOffset(months=1)
         prev_data_df = df[df['period'] == prev_period]
         prev_data = prev_data_df.iloc[0] if not prev_data_df.empty else None
         
         st.subheader(f"{latest_data['period'].strftime('%Y년 %m월')} 핵심 성과 지표 (전월 대비)")
         kpi_cols = st.columns(4)
-        
         for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
             val = latest_data[metric]
             delta = val - prev_data[metric] if prev_data is not None else 0
@@ -247,7 +244,7 @@ if sales_file:
             with vis_col1:
                 target_metric = st.selectbox("분석 지표 선택", ['설치완료', '접수', '컨택', '성공', '성공율'])
             with vis_col2:
-                chart_type = st.radio("그래프 형태 선택", ["꺾은선형 그래프", "막대 그래프"], horizontal=True)
+                chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
                 
             unique_periods = df['period'].drop_duplicates().sort_values()
             asc_period_options = unique_periods.dt.strftime('%Y년 %m월').tolist()
@@ -265,6 +262,10 @@ if sales_file:
                 st.warning("시작 월이 종료 월보다 늦을 수 없습니다. 기간을 다시 확인해주십시오.")
             else:
                 chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
+                
+                # 수치가 0인 달은 차트에서 제외 (공란/미입력 데이터 숨김)
+                chart_df = chart_df[chart_df[target_metric] > 0]
+                
                 if not chart_df.empty:
                     # 가독성을 높이기 위해 '25년 1월' 형태로 텍스트 변환
                     chart_df['조회월'] = chart_df['period'].dt.strftime('%y년 ') + chart_df['period'].dt.month.astype(str) + '월'
@@ -272,27 +273,36 @@ if sales_file:
                     if target_metric == '성공율':
                         chart_df[target_metric] = chart_df[target_metric] * 100
 
-                    # ---------------------------------------------------------
-                    # 빅테크 스타일 고급 시각화 (Plotly)
-                    # ---------------------------------------------------------
                     if chart_type == "막대 그래프":
                         fig = px.bar(chart_df, x='조회월', y=target_metric, 
                                      text_auto='.1f' if target_metric == '성공율' else '.0f')
                         fig.update_traces(marker_color='#1E88E5', textposition='outside', textfont_size=12)
                     else:
-                        # 꺾은선형 그래프: 마커 추가 및 디자인 개선
-                        fig = px.line(chart_df, x='조회월', y=target_metric, markers=True)
-                        fig.update_traces(line=dict(width=3, color='#1E88E5'), marker=dict(size=8, color='#0D47A1'))
+                        # 꺾은선형 그래프: 수치 라벨 추가
+                        fig = px.line(chart_df, x='조회월', y=target_metric, markers=True, text=target_metric)
+                        fig.update_traces(
+                            line=dict(width=3, color='#1E88E5'), 
+                            marker=dict(size=8, color='#0D47A1'),
+                            texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:.0f}',
+                            textposition="top center"
+                        )
                         
-                    # 배경 투명화 및 그리드(눈금선) 최적화
+                    # 배경 투명화, 세로 글씨 제거, 가로 글씨 고정 등 디자인 최적화
                     fig.update_layout(
                         plot_bgcolor='rgba(0,0,0,0)',
                         paper_bgcolor='rgba(0,0,0,0)',
                         xaxis_title="",
-                        yaxis_title=f"{target_metric} {'(%)' if target_metric == '성공율' else '(건)'}",
-                        margin=dict(l=0, r=0, t=20, b=0),
-                        xaxis=dict(showgrid=False, tickangle=-45),
-                        yaxis=dict(showgrid=True, gridcolor='#E0E0E0')
+                        yaxis_title="",  # 기존 좌측 세로 글씨 삭제
+                        margin=dict(l=10, r=10, t=50, b=10),
+                        xaxis=dict(showgrid=False, tickangle=0, type='category'), # 글씨 가로(0도) 고정
+                        yaxis=dict(showgrid=True, gridcolor='#E0E0E0'),
+                        annotations=[dict(
+                            x=0, y=1.1, xref='paper', yref='paper',
+                            text=f"{target_metric} {'(%)' if target_metric == '성공율' else '(건)'}", # 좌측 상단 가로 글씨 배치
+                            showarrow=False,
+                            font=dict(size=13, color='gray'),
+                            xanchor='left', yanchor='bottom'
+                        )]
                     )
                     
                     st.plotly_chart(fig, use_container_width=True)
@@ -300,16 +310,17 @@ if sales_file:
                     if target_metric == '성공율':
                         st.caption("※ 성공율은 가시성을 위해 백분율(%) 스케일로 출력됩니다.")
                 else:
-                    st.warning("선택하신 기간 내에 데이터가 존재하지 않습니다.")
+                    st.warning("선택하신 기간 내에 유효한(0보다 큰) 수치 데이터가 존재하지 않습니다.")
         
-        with st.expander("데이터 원본 확인"):
+        with st.expander("시스템 정제 데이터 원본 보기"): 
             display_df = df.drop(columns=['year'], errors='ignore').copy()
             display_df['조회월'] = display_df['period'].dt.strftime('%Y-%m')
             display_df = display_df.set_index('조회월').drop(columns=['period'])
-            st.dataframe(display_df)
+            st.dataframe(display_df.style.format({
+                "성공율": "{:.2%}", "접수": "{:.0f}", "컨택": "{:.0f}", "성공": "{:.0f}", "설치완료": "{:.0f}"
+            }))
             
     else:
-        pass
+        st.error("데이터 처리 중 문제가 발생했습니다. 파일 형식을 다시 확인해주십시오.")
 else:
     st.info("좌측 메뉴에서 데이터를 업로드하여 대시보드를 활성화해주십시오.")
-
