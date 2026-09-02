@@ -6,32 +6,45 @@ import traceback
 import plotly.express as px
 
 # =====================================================================
-# [0단계] 고급 디자인 커스텀 CSS (아이보리 배경 + 카드형 UI)
+# [0단계] 고급 디자인 커스텀 CSS (입체감 및 카드형 UI 강화)
 # =====================================================================
 def apply_custom_css():
     st.markdown("""
         <style>
-            /* 메인 배경색을 부드러운 아이보리 톤으로 변경 */
+            /* 메인 배경색 (부드러운 아이보리 톤) */
             .stApp {
                 background-color: #F9F9F6;
             }
             
-            /* KPI 메트릭 카드 디자인 (그림자, 둥근 모서리, 흰색 배경) */
+            /* KPI 메트릭 카드 디자인 (입체감 강화) */
             [data-testid="stMetric"] {
                 background-color: #FFFFFF;
-                padding: 15px 20px;
-                border-radius: 10px;
-                box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.05);
+                padding: 20px 25px;
+                border-radius: 12px;
+                box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.08); /* 그림자 깊이 증가 */
                 border: 1px solid #EAEAEA;
-                border-left: 5px solid #1E88E5; /* 좌측 파란색 포인트 라인 */
+                border-left: 6px solid #2C3E50; /* 전문적인 다크 네이비 포인트 */
+                transition: transform 0.2s ease;
             }
             
-            /* 차트 및 데이터 영역 배경 흰색 처리 */
-            .css-1r6slb0, .css-12oz5g7 {
+            [data-testid="stMetric"]:hover {
+                transform: translateY(-3px);
+                box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.12);
+            }
+            
+            /* 접었다 펼치는 보드(Expander) 컨테이너 입체감 디자인 */
+            [data-testid="stExpander"] {
                 background-color: #FFFFFF;
-                border-radius: 10px;
-                padding: 20px;
-                box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.05);
+                border-radius: 12px;
+                box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.06);
+                border: 1px solid #E5E5E5;
+                margin-bottom: 15px;
+            }
+            
+            /* 텍스트 폰트 컬러 최적화 */
+            h1, h2, h3, h4 {
+                color: #2C3E50 !important;
+                font-weight: 700 !important;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -53,7 +66,7 @@ def standardize_metric_name(raw_name):
     return clean_name
 
 # =====================================================================
-# [2단계] 핵심 매출 데이터 파싱 (오류 원천 차단)
+# [2단계] 핵심 매출 데이터 파싱
 # =====================================================================
 def parse_sales_data(uploaded_file):
     try:
@@ -72,7 +85,7 @@ def parse_sales_data(uploaded_file):
                         anchor_c = c
         
         if not header_rows:
-            st.error("데이터 인식 실패: 표에서 '구분' 항목을 찾을 수 없습니다.")
+            st.error("데이터 인식 실패: 표에서 '구분' 항목을 찾을 수 없습니다. 원본 파일을 확인해주십시오.")
             return None
 
         records = []
@@ -97,7 +110,7 @@ def parse_sales_data(uploaded_file):
                     m = int(num_str[4:6])
                 elif len(nums) >= 2:
                     y = int(nums[0])
-                    m = int(nums) # 완벽하게 수정된 로직
+                    m = int(nums)
                 
                 if y != -1 and m != -1:
                     if y < 100: y += 2000
@@ -146,7 +159,7 @@ def parse_sales_data(uploaded_file):
         return None
 
 # =====================================================================
-# [3단계] CRM 데이터 및 종합 분석 리포트 (전월 대비 계산)
+# [3단계] CRM 데이터 및 종합 분석 리포트
 # =====================================================================
 def parse_crm_data(uploaded_file):
     try:
@@ -170,12 +183,11 @@ def parse_crm_data(uploaded_file):
 def generate_ai_analysis(df, selected_period, crm_df=None):
     current_data = df[df['period'] == selected_period]
     if current_data.empty or current_data.iloc[0]['접수'] == 0:
-        return "⚠️ 선택하신 월의 실적 데이터가 충분하지 않습니다."
+        return "선택하신 월의 실적 데이터가 충분하지 않습니다."
         
     latest = current_data.iloc[0]
-    analysis_texts = [f"### 💡 {latest['period'].strftime('%Y년 %m월')} 성과 인사이트"]
+    analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 성과 인사이트"]
     
-    # 전년 동월이 아닌 '전월' 기준으로 분석
     prev_month_dt = latest['period'] - pd.DateOffset(months=1)
     prev_data_df = df[df['period'] == prev_month_dt]
     
@@ -184,10 +196,10 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         rec_diff = latest['접수'] - prev['접수']
         rate_diff = (latest['성공율'] - prev['성공율']) * 100
         
-        trend_rec = "증가📈" if rec_diff > 0 else "감소📉"
+        trend_rec = "증가" if rec_diff > 0 else "감소"
         analysis_texts.append(
-            f"- **전월 대비 성과**: 접수 건수는 **{abs(rec_diff):,.0f}건 {trend_rec}**하였으며, "
-            f"성공율은 **{rate_diff:+.1f}%p 변동**하였습니다."
+            f"- 전월 대비 성과: 접수 건수는 {abs(rec_diff):,.0f}건 {trend_rec}하였으며, "
+            f"성공율은 {rate_diff:+.1f}%p 변동하였습니다."
         )
     else:
         analysis_texts.append("- 이전 달의 유효한 데이터가 존재하지 않아 전월 대비 성과를 산출할 수 없습니다.")
@@ -200,8 +212,8 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 best = stats.index[0]
                 best_rate = stats.iloc[0]
                 analysis_texts.append(
-                    f"- **주요 타겟 고객층**: CRM 분석 결과, **{best[0]} {best}** 고객군의 성공율이 **{best_rate:.1%}**로 "
-                    f"가장 높게 측정되었습니다. 마케팅 시 해당 타겟을 우선 고려하시기 바랍니다."
+                    f"- 주요 타겟 고객층: CRM 분석 결과, {best[0]} {best} 고객군의 성공율이 {best_rate:.1%}로 "
+                    f"가장 높게 측정되었습니다. 캠페인 진행 시 해당 타겟에 자원을 우선 배정할 것을 권장합니다."
                 )
         except:
             pass
@@ -209,15 +221,15 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     return "\n\n".join(analysis_texts)
 
 # =====================================================================
-# [4단계] 대시보드 UI 구성 (카드형 메인 렌더링)
+# [4단계] 대시보드 UI 구성
 # =====================================================================
 st.set_page_config(layout="wide", page_title="현대렌탈케어 고객만족센터 매출관리 대시보드")
-apply_custom_css() # 아이보리 배경 + 카드 디자인 적용
+apply_custom_css()
 
-st.title("📊 현대렌탈케어 고객만족센터 매출관리 대시보드")
+st.title("현대렌탈케어 고객만족센터 매출관리 대시보드")
 st.markdown("---")
 
-st.sidebar.header("📁 데이터 업로드")
+st.sidebar.header("데이터 업로드")
 sales_file = st.sidebar.file_uploader("1. 매출 데이터 (필수)", type=["xlsx", "xls"])
 crm_file = st.sidebar.file_uploader("2. CRM 데이터 (선택)", type=["xlsx", "xls"])
 
@@ -226,15 +238,14 @@ if sales_file:
     crm_df = parse_crm_data(crm_file) if crm_file else None
     
     if df is not None and not df.empty:
-        # 데이터가 있는 연도와 월 추출
-        available_years = sorted(df['period'].dt.year.unique().tolist())
-        months = list(range(1, 13))
         
         valid_periods = df[df['접수'] > 0]['period']
         default_period = valid_periods.max() if not valid_periods.empty else df['period'].max()
         
-        # [메인 기준일 UI 개편] 차트와 동일하게 연/월을 직관적으로 선택하는 기능
-        st.markdown("#### 🎯 메인 KPI 조회 기준월 설정")
+        available_years = sorted(df['period'].dt.year.unique().tolist())
+        months = list(range(1, 13))
+        
+        st.markdown("#### 조회 기준월 설정")
         m_col1, m_col2, _ = st.columns([1.5, 1.5, 7])
         
         with m_col1:
@@ -245,9 +256,8 @@ if sales_file:
         selected_period = pd.to_datetime(f"{sel_main_y}-{sel_main_m}-01")
         current_data_df = df[df['period'] == selected_period]
         
-        # 선택한 월에 데이터가 없으면 경고문구 출력 후 차트는 보여줌
         if current_data_df.empty or current_data_df.iloc[0]['접수'] == 0:
-            st.warning(f"⚠️ {sel_main_y}년 {sel_main_m}월의 실적 데이터가 입력되지 않았습니다. 메인 지표는 0으로 표기됩니다.")
+            st.warning(f"{sel_main_y}년 {sel_main_m}월의 실적 데이터가 입력되지 않았습니다. 메인 지표는 0으로 표기됩니다.")
             latest_data = pd.Series({'접수':0, '컨택':0, '성공':0, '성공율':0.0, '설치완료':0})
         else:
             latest_data = current_data_df.iloc[0]
@@ -257,117 +267,120 @@ if sales_file:
         prev_data = prev_data_df.iloc[0] if not prev_data_df.empty else None
         
         st.markdown("<br>", unsafe_allow_html=True)
-        kpi_cols = st.columns(4)
         
-        for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
-            val = latest_data.get(metric, 0)
-            delta = val - prev_data[metric] if prev_data is not None else 0
-            
-            if metric == '성공율': 
-                col.metric(metric, f"{val:.1%}", f"{delta*100:+.1f}%p")
-            else: 
-                col.metric(f"{metric} (건)", f"{val:,.0f}", f"{delta:+.0f}")
+        # [기능 추가] 숨기기/재표시가 가능한 Expander로 KPI 보드 구성
+        with st.expander(f"{sel_main_y}년 {sel_main_m}월 핵심 성과 지표", expanded=True):
+            kpi_cols = st.columns(4)
+            for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
+                val = latest_data.get(metric, 0)
+                delta = val - prev_data[metric] if prev_data is not None else 0
                 
-        st.markdown("<br><br>", unsafe_allow_html=True)
+                if metric == '성공율': 
+                    col.metric(metric, f"{val:.1%}", f"{delta*100:+.1f}%p")
+                else: 
+                    col.metric(f"{metric} (건)", f"{val:,.0f}", f"{delta:+.0f}")
+                    
+        st.markdown("<br>", unsafe_allow_html=True)
         col1, col2 = st.columns([3.5, 6.5])
         
         with col1:
-            st.subheader("📝 데이터 분석 리포트")
-            st.markdown(generate_ai_analysis(df, selected_period, crm_df))
-            
-            st.markdown("<br><b>🏆 연도별 최고 실적 현황 (성공율 기준)</b>", unsafe_allow_html=True)
-            df['year'] = df['period'].dt.year
-            df_valid = df[df['성공율'] > 0]
-            if not df_valid.empty:
-                best_per_year = df_valid.loc[df_valid.groupby('year')['성공율'].idxmax()]
-                for _, row in best_per_year.iterrows():
-                    st.info(f"**{row['year']}년 최고 실적**: {row['period'].strftime('%m월')} (성공율 {row['성공율']:.1%})")
+            # 리포트 영역 Expander 적용
+            with st.expander("데이터 분석 리포트", expanded=True):
+                st.markdown(generate_ai_analysis(df, selected_period, crm_df))
+                
+                st.markdown("<br><b>연도별 최고 실적 현황 (성공율 기준)</b>", unsafe_allow_html=True)
+                df['year'] = df['period'].dt.year
+                df_valid = df[df['성공율'] > 0]
+                if not df_valid.empty:
+                    best_per_year = df_valid.loc[df_valid.groupby('year')['성공율'].idxmax()]
+                    for _, row in best_per_year.iterrows():
+                        st.info(f"{row['year']}년 최고 실적: {row['period'].strftime('%m월')} (성공율 {row['성공율']:.1%})")
 
         with col2:
-            st.subheader("📈 지표별 트렌드 분석 (시각화)")
-            
-            vis_col1, vis_col2 = st.columns(2)
-            with vis_col1:
-                target_metric = st.selectbox("분석 지표 커스터마이징", ['설치완료', '접수', '컨택', '성공', '성공율'])
-            with vis_col2:
-                chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
-                
-            st.markdown("<br><b>차트 조회 기간 설정</b>", unsafe_allow_html=True)
-            start_d = df['period'].min()
-            end_d = df['period'].max()
-            
-            sc1, sc2, sc3, sc4 = st.columns(4)
-            with sc1:
-                start_y = st.selectbox("시작 연도", options=available_years, index=0, format_func=lambda x: f"{x}년", key="c_sy")
-            with sc2:
-                start_m_idx = months.index(start_d.month) if start_y == start_d.year else 0
-                start_m = st.selectbox("시작 월", options=months, index=start_m_idx, format_func=lambda x: f"{x}월", key="c_sm")
-            with sc3:
-                end_y = st.selectbox("종료 연도", options=available_years, index=len(available_years)-1, format_func=lambda x: f"{x}년", key="c_ey")
-            with sc4:
-                end_m_idx = months.index(end_d.month) if end_y == end_d.year else 11
-                end_m = st.selectbox("종료 월", options=months, index=end_m_idx, format_func=lambda x: f"{x}월", key="c_em")
-                
-            start_p = pd.to_datetime(f"{start_y}-{start_m}-01")
-            end_p = pd.to_datetime(f"{end_y}-{end_m}-01")
-            
-            if start_p > end_p:
-                st.warning("시작 연/월이 종료 연/월보다 늦을 수 없습니다.")
-            else:
-                chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
-                chart_df = chart_df[chart_df[target_metric] > 0]
-                
-                if not chart_df.empty:
-                    chart_df['조회월'] = chart_df['period'].dt.strftime('%y년 ') + chart_df['period'].dt.month.astype(str) + '월'
+            # 시각화 영역 Expander 적용
+            with st.expander("지표별 트렌드 분석 (시각화)", expanded=True):
+                vis_col1, vis_col2 = st.columns(2)
+                with vis_col1:
+                    target_metric = st.selectbox("분석 지표 커스터마이징", ['설치완료', '접수', '컨택', '성공', '성공율'])
+                with vis_col2:
+                    chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
                     
-                    if target_metric == '성공율':
-                        chart_df[target_metric] = chart_df[target_metric] * 100
+                st.markdown("<br><b>차트 조회 기간 설정</b>", unsafe_allow_html=True)
+                start_d = df['period'].min()
+                end_d = df['period'].max()
+                
+                sc1, sc2, sc3, sc4 = st.columns(4)
+                with sc1:
+                    start_y = st.selectbox("시작 연도", options=available_years, index=0, format_func=lambda x: f"{x}년", key="c_sy")
+                with sc2:
+                    start_m_idx = months.index(start_d.month) if start_y == start_d.year else 0
+                    start_m = st.selectbox("시작 월", options=months, index=start_m_idx, format_func=lambda x: f"{x}월", key="c_sm")
+                with sc3:
+                    end_y = st.selectbox("종료 연도", options=available_years, index=len(available_years)-1, format_func=lambda x: f"{x}년", key="c_ey")
+                with sc4:
+                    end_m_idx = months.index(end_d.month) if end_y == end_d.year else 11
+                    end_m = st.selectbox("종료 월", options=months, index=end_m_idx, format_func=lambda x: f"{x}월", key="c_em")
+                    
+                start_p = pd.to_datetime(f"{start_y}-{start_m}-01")
+                end_p = pd.to_datetime(f"{end_y}-{end_m}-01")
+                
+                if start_p > end_p:
+                    st.warning("시작 연/월이 종료 연/월보다 늦을 수 없습니다.")
+                else:
+                    chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
+                    chart_df = chart_df[chart_df[target_metric] > 0]
+                    
+                    if not chart_df.empty:
+                        chart_df['조회월'] = chart_df['period'].dt.strftime('%y년 ') + chart_df['period'].dt.month.astype(str) + '월'
+                        
+                        if target_metric == '성공율':
+                            chart_df[target_metric] = chart_df[target_metric] * 100
 
-                    if chart_type == "막대 그래프":
-                        fig = px.bar(chart_df, x='조회월', y=target_metric, text=target_metric)
-                        fig.update_traces(
-                            texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}',
-                            textposition='outside', 
-                            marker_color='#1E88E5', 
-                            textfont_size=13,
-                            cliponaxis=False        
-                        )
-                    else:
-                        fig = px.line(chart_df, x='조회월', y=target_metric, markers=True, text=target_metric)
-                        fig.update_traces(
-                            line=dict(width=3, color='#1E88E5'), 
-                            marker=dict(size=8, color='#0D47A1'),
-                            texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}',
-                            textposition="top center",
-                            textfont_size=13,
-                            cliponaxis=False
+                        if chart_type == "막대 그래프":
+                            fig = px.bar(chart_df, x='조회월', y=target_metric, text=target_metric)
+                            fig.update_traces(
+                                texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}',
+                                textposition='outside', 
+                                marker_color='#1E88E5', 
+                                textfont_size=13,
+                                cliponaxis=False        
+                            )
+                        else:
+                            fig = px.line(chart_df, x='조회월', y=target_metric, markers=True, text=target_metric)
+                            fig.update_traces(
+                                line=dict(width=3, color='#1E88E5'), 
+                                marker=dict(size=8, color='#2C3E50'),
+                                texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}',
+                                textposition="top center",
+                                textfont_size=13,
+                                cliponaxis=False
+                            )
+                            
+                        max_val = chart_df[target_metric].max()
+                        y_max_range = max_val * 1.2 if max_val > 0 else 1.0
+
+                        fig.update_layout(
+                            plot_bgcolor='rgba(255,255,255,1)',
+                            paper_bgcolor='rgba(255,255,255,1)',
+                            xaxis_title="",
+                            yaxis_title="",  
+                            margin=dict(l=10, r=10, t=70, b=10),
+                            xaxis=dict(showgrid=False, tickangle=-45, type='category', categoryorder='array', categoryarray=chart_df['조회월']),
+                            yaxis=dict(showgrid=True, gridcolor='#F0F0F0', range=[0, y_max_range]),
+                            annotations=[dict(
+                                x=0, y=1.15, xref='paper', yref='paper',
+                                text=f"<b>{target_metric}</b> {'(%)' if target_metric == '성공율' else '(건)'}", 
+                                showarrow=False, font=dict(size=14, color='#555555'), xanchor='left', yanchor='bottom'
+                            )]
                         )
                         
-                    max_val = chart_df[target_metric].max()
-                    y_max_range = max_val * 1.2 if max_val > 0 else 1.0
-
-                    fig.update_layout(
-                        plot_bgcolor='rgba(255,255,255,1)',
-                        paper_bgcolor='rgba(255,255,255,1)',
-                        xaxis_title="",
-                        yaxis_title="",  
-                        margin=dict(l=10, r=10, t=60, b=10),
-                        xaxis=dict(showgrid=False, tickangle=-45, type='category', categoryorder='array', categoryarray=chart_df['조회월']),
-                        yaxis=dict(showgrid=True, gridcolor='#F0F0F0', range=[0, y_max_range]),
-                        annotations=[dict(
-                            x=0, y=1.1, xref='paper', yref='paper',
-                            text=f"<b>{target_metric}</b> {'(%)' if target_metric == '성공율' else '(건)'}", 
-                            showarrow=False, font=dict(size=14, color='#555555'), xanchor='left', yanchor='bottom'
-                        )]
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    if target_metric == '성공율':
-                        st.caption("※ 성공율은 백분율(%) 스케일로 출력됩니다.")
-                else:
-                    st.info("선택하신 기간 내에 유효한 수치 데이터가 존재하지 않습니다.")
+                        st.plotly_chart(fig, use_container_width=True)
+                        if target_metric == '성공율':
+                            st.caption("※ 성공율은 백분율(%) 스케일로 출력됩니다.")
+                    else:
+                        st.info("선택하신 기간 내에 유효한 수치 데이터가 존재하지 않습니다.")
         
-        with st.expander("데이터 원본 표 확인"):
+        with st.expander("데이터 원본 표 확인", expanded=False):
             display_df = df.drop(columns=['year'], errors='ignore').copy()
             display_df['조회월'] = display_df['period'].dt.strftime('%Y-%m')
             display_df = display_df.set_index('조회월').drop(columns=['period'])
