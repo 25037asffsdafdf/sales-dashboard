@@ -21,7 +21,7 @@ def standardize_metric_name(raw_name):
     return clean_name
 
 # =====================================================================
-# [2단계] 핵심 매출 데이터 파싱 (다중 테이블 완벽 호환 및 YYYYMM 처리)
+# [2단계] 핵심 매출 데이터 파싱 (다중 테이블 완벽 호환)
 # =====================================================================
 def parse_sales_data(uploaded_file):
     try:
@@ -31,7 +31,6 @@ def parse_sales_data(uploaded_file):
         header_rows = []
         anchor_c = -1
         
-        # 파일 내 모든 '구분' 위치 탐색 (2025년 표, 2026년 표 모두 인식)
         for r in range(len(df_raw)):
             for c in range(len(df_raw.columns)):
                 cell_val = str(df_raw.iat[r, c]).replace(" ", "").replace("\n", "")
@@ -46,7 +45,6 @@ def parse_sales_data(uploaded_file):
 
         records = []
         
-        # 인식된 모든 표(2025년, 2026년 등) 순차 처리
         for i, h_idx in enumerate(header_rows):
             end_idx = header_rows[i+1] if i + 1 < len(header_rows) else len(df_raw)
             block = df_raw.iloc[h_idx:end_idx]
@@ -74,7 +72,6 @@ def parse_sales_data(uploaded_file):
                     if 2000 <= y <= 2100 and 1 <= m <= 12:
                         dates[c] = pd.Timestamp(y, m, 1)
 
-            # 지표 및 수치 매핑
             for r_idx in range(1, len(block)):
                 metric_raw = block.iat[r_idx, anchor_c]
                 metric = standardize_metric_name(metric_raw)
@@ -93,12 +90,10 @@ def parse_sales_data(uploaded_file):
             st.error("데이터 추출 실패: 유효한 날짜 및 수치 데이터를 찾지 못했습니다.")
             return None
 
-        # 데이터 프레임화 및 병합 (중복 시 마지막 값 적용)
         df_long = pd.DataFrame(records)
         df_long = df_long.groupby(['period', 'metric'], as_index=False)['value'].last()
         df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
         
-        # 필수 지표 누락 방지 및 "완벽한 숫자형 변환"으로 표 출력 에러 차단
         for req in ['접수', '컨택', '성공', '성공율', '설치완료']:
             if req not in df_pivot.columns: 
                 df_pivot[req] = 0.0
@@ -107,7 +102,6 @@ def parse_sales_data(uploaded_file):
                 
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
-        # 성공율 시스템 강제 계산 (성공 / 접수)
         df_pivot['성공율'] = df_pivot.apply(
             lambda row: row['성공'] / row['접수'] if row.get('접수', 0) > 0 else 0.0, axis=1
         )
@@ -200,7 +194,6 @@ if sales_file:
     if df is not None and not df.empty:
         st.sidebar.success("데이터 처리 완료")
         
-        # 월 선택 기능 (기본값: 접수 실적이 있는 가장 최근 월)
         valid_periods = df[df['접수'] > 0]['period']
         default_period = valid_periods.max() if not valid_periods.empty else df['period'].max()
         
@@ -213,7 +206,6 @@ if sales_file:
         
         latest_data = df[df['period'] == selected_period].iloc[0]
         
-        # 전월 데이터 비교 계산
         prev_period = selected_period - pd.DateOffset(months=1)
         prev_data_df = df[df['period'] == prev_period]
         prev_data = prev_data_df.iloc[0] if not prev_data_df.empty else None
@@ -237,7 +229,6 @@ if sales_file:
             st.subheader("데이터 분석 리포트")
             st.markdown(generate_ai_analysis(df, selected_period, crm_df))
             
-            # 연도별 최고 실적 월 작게 표기
             st.markdown("<br><b>연도별 최고 실적 현황 (성공율 기준)</b>", unsafe_allow_html=True)
             df['year'] = df['period'].dt.year
             df_valid = df[df['성공율'] > 0]
@@ -249,18 +240,27 @@ if sales_file:
 
         with col2:
             st.subheader("설치 완료 건수 트렌드")
-            start_d = df['period'].min().date()
-            end_d = df['period'].max().date()
-            
             chart_type = st.radio("그래프 형태 선택", ["막대 그래프", "꺾은선형 그래프"], horizontal=True)
-            date_range = st.date_input("조회 기간 설정", value=(start_d, end_d), min_value=start_d, max_value=end_d)
             
-            if isinstance(date_range, tuple) and len(date_range) == 2:
-                start_p, end_p = pd.to_datetime(date_range[0]), pd.to_datetime(date_range)
-                chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
+            # [수정 완료] 에러를 유발하는 달력(Date Input) 대신 안전한 드롭다운(월 선택기) 적용
+            unique_periods = df['period'].drop_duplicates().sort_values()
+            asc_period_options = unique_periods.dt.strftime('%Y년 %m월').tolist()
+            
+            sc1, sc2 = st.columns(2)
+            with sc1:
+                start_month_str = st.selectbox("조회 시작 월", options=asc_period_options, index=0)
+            with sc2:
+                end_month_str = st.selectbox("조회 종료 월", options=asc_period_options, index=len(asc_period_options)-1)
                 
+            start_p = pd.to_datetime(start_month_str, format='%Y년 %m월')
+            end_p = pd.to_datetime(end_month_str, format='%Y년 %m월')
+            
+            if start_p > end_p:
+                st.warning("시작 월이 종료 월보다 늦을 수 없습니다. 기간을 다시 확인해주십시오.")
+            else:
+                chart_df = df[(df['period'] >= start_p) & (df['period'] <= end_p)].copy()
                 if not chart_df.empty:
-                    chart_df['조회월'] = chart_df['period'].dt.strftime('%y-%m')
+                    chart_df['조회월'] = chart_df['period'].dt.strftime('%Y-%m')
                     chart_data = chart_df.set_index('조회월')['설치완료']
                     
                     if chart_type == "막대 그래프":
@@ -269,17 +269,11 @@ if sales_file:
                         st.line_chart(chart_data)
                 else:
                     st.warning("선택하신 기간 내에 데이터가 존재하지 않습니다.")
-            else:
-                st.info("시작일과 종료일을 모두 지정해주십시오.")
         
-        # [해결 완료] 스타일링 기능을 모두 빼고 오류 없이 안전한 형태로 원본 데이터 표출
         with st.expander("데이터 원본 확인"):
-            # 깔끔하게 보여주기 위해 'year' 삭제 및 날짜 컬럼 보기 좋게 변환
             display_df = df.drop(columns=['year'], errors='ignore').copy()
             display_df['조회월'] = display_df['period'].dt.strftime('%Y-%m')
             display_df = display_df.set_index('조회월').drop(columns=['period'])
-            
-            # 스타일 충돌 없는 안전한 기본 데이터프레임 렌더링
             st.dataframe(display_df)
             
     else:
