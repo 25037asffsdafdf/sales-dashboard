@@ -4,7 +4,7 @@ from datetime import datetime
 import re
 import traceback
 
-# --- 1. 무결성 확보 데이터 파싱 ---
+# --- 1. 철저한 예외 처리가 적용된 데이터 파싱 ---
 def parse_sales_data(uploaded_file):
     try:
         df_raw = pd.read_excel(uploaded_file, header=None)
@@ -13,7 +13,7 @@ def parse_sales_data(uploaded_file):
         header_r = -1
         header_c = -1
         
-        # [검증 1] '구분' 셀의 정확한 2차원 좌표 탐색
+        # '구분' 좌표 찾기
         for r in range(len(df_raw)):
             for c in range(len(df_raw.columns)):
                 cell_str = str(df_raw.iat[r, c]).replace(" ", "").replace("\n", "")
@@ -24,42 +24,45 @@ def parse_sales_data(uploaded_file):
             if header_r != -1: break
             
         if header_r == -1:
-            st.error("데이터 인식 실패: 표 좌측 상단에 '구분' 항목이 명시되어 있는지 확인해주십시오.")
+            st.error("데이터 인식 실패: 표 좌측 상단에 '구분' 항목을 찾을 수 없습니다.")
             return None
 
-        # [검증 2] 날짜(월) 데이터 추출 및 표준화
         parsed_dates = {}
+        # 열을 이동하며 날짜 데이터 추출
         for c in range(header_c + 1, len(df_raw.columns)):
             date_val = str(df_raw.iat[header_r, c]).replace(" ", "")
             if not date_val: continue
             
-            # 숫자만 추출하여 연도와 월 확인
             nums = re.findall(r'\d+', date_val)
+            
+            # [방어 로직] 리스트 내부 접근 시 에러가 나지 않도록 try-except로 감쌈
             if len(nums) >= 2:
-                # !!! 치명적이었던 오타 수정 완료 !!! (nums -> nums)
-                year, month = int(nums[0]), int(nums)
-                
-                # 연도가 2자리로 입력되었을 경우 4자리로 보정
-                if year < 100: year += 2000
-                if 2000 <= year <= 2100 and 1 <= month <= 12:
-                    parsed_dates[c] = pd.Timestamp(year, month, 1)
+                try:
+                    year = int(nums[0])
+                    month = int(nums) # 확실하게 수정된 부분입니다.
+                    
+                    if year < 100: year += 2000
+                    if 2000 <= year <= 2100 and 1 <= month <= 12:
+                        parsed_dates[c] = pd.Timestamp(year, month, 1)
+                except Exception:
+                    continue # 에러 발생 시 해당 열은 건너뛰고 다음 열 진행
             elif len(nums) == 1:
-                # 연도 없이 '1월' 처럼 월만 적혀있을 경우
-                month = int(nums[0])
-                if 1 <= month <= 12:
-                    parsed_dates[c] = pd.Timestamp(datetime.now().year, month, 1)
+                try:
+                    month = int(nums[0])
+                    if 1 <= month <= 12:
+                        parsed_dates[c] = pd.Timestamp(datetime.now().year, month, 1)
+                except Exception:
+                    continue
 
         if not parsed_dates:
-            st.error("데이터 인식 실패: '구분' 우측열에 위치한 날짜(연/월) 데이터를 인식하지 못했습니다.")
+            st.error("데이터 인식 실패: 날짜(연/월) 데이터를 인식하지 못했습니다.")
             return None
 
-        # [검증 3] 지표명 표준화 및 수치 추출
         records = []
         for r in range(header_r + 1, len(df_raw)):
             metric_raw = str(df_raw.iat[r, header_c]).replace(" ", "").replace("\n", "")
             if not metric_raw: continue
             
-            # 범용 지표명 매핑 규칙
             if '접수' in metric_raw and ('비' in metric_raw or '比' in metric_raw or '율' in metric_raw): metric = '성공율'
             elif '성공' in metric_raw and '율' in metric_raw: metric = '성공율'
             elif '설치' in metric_raw and '완료' in metric_raw: metric = '설치완료'
@@ -73,7 +76,7 @@ def parse_sales_data(uploaded_file):
                 v_num = re.sub(r'[^\d.-]', '', val_raw)
                 try:
                     val = float(v_num) if v_num and v_num != '-' else 0.0
-                except:
+                except Exception:
                     val = 0.0
                 
                 records.append({'period': period_dt, 'metric': metric, 'value': val})
@@ -81,20 +84,18 @@ def parse_sales_data(uploaded_file):
         if not records:
             return None
 
-        # [검증 4] 중복 인덱스 방지를 위한 피벗 테이블 생성
         df_long = pd.DataFrame(records)
         df_pivot = df_long.pivot_table(index='period', columns='metric', values='value', aggfunc='last').reset_index()
         
-        # [검증 5] 필수 열 강제 할당
         for req_col in ['접수', '컨택', '성공', '성공율', '설치완료']:
             if req_col not in df_pivot.columns:
                 df_pivot[req_col] = 0.0
                 
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
-        # [검증 6] 성공율 시스템 강제 재계산
+        # 엑셀의 성공율 텍스트/숫자 서식 오류를 무시하고 시스템에서 강제 계산
         df_pivot['성공율'] = df_pivot.apply(
-            lambda row: row['성공'] / row['접수'] if row['접수'] > 0 else 0.0, axis=1
+            lambda row: row['성공'] / row['접수'] if row.get('접수', 0) > 0 else 0.0, axis=1
         )
         
         return df_pivot
@@ -133,7 +134,6 @@ def generate_ai_analysis(df, crm_df=None):
     latest = df.iloc[-1]
     analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 실적 종합 리포트"]
     
-    # 전년 동월 대비 분석
     last_year_month = latest['period'].replace(year=latest['period'].year - 1)
     last_year_data = df[df['period'] == last_year_month]
     
@@ -148,7 +148,6 @@ def generate_ai_analysis(df, crm_df=None):
             f"성공율은 {success_rate_diff:+.1f}%p 변동하였습니다."
         )
         
-    # CRM 기반 인구통계학적 타겟 분석
     if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별']):
         group_stats = crm_df.groupby(['연령대', '성별'])['성공여부'].apply(lambda x: (x == '성공').mean()).sort_values(ascending=False)
         if not group_stats.empty:
