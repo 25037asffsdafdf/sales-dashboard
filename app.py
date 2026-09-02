@@ -11,28 +11,22 @@ import plotly.express as px
 def apply_custom_css():
     st.markdown("""
         <style>
-            /* 메인 배경색 (부드러운 아이보리 톤) */
             .stApp {
                 background-color: #F9F9F6;
             }
-            
-            /* KPI 메트릭 카드 디자인 (입체감 강화) */
             [data-testid="stMetric"] {
                 background-color: #FFFFFF;
                 padding: 20px 25px;
                 border-radius: 12px;
-                box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.08); /* 그림자 깊이 증가 */
+                box-shadow: 0px 6px 15px rgba(0, 0, 0, 0.08);
                 border: 1px solid #EAEAEA;
-                border-left: 6px solid #2C3E50; /* 전문적인 다크 네이비 포인트 */
+                border-left: 6px solid #2C3E50;
                 transition: transform 0.2s ease;
             }
-            
             [data-testid="stMetric"]:hover {
                 transform: translateY(-3px);
                 box-shadow: 0px 8px 20px rgba(0, 0, 0, 0.12);
             }
-            
-            /* 접었다 펼치는 보드(Expander) 컨테이너 입체감 디자인 */
             [data-testid="stExpander"] {
                 background-color: #FFFFFF;
                 border-radius: 12px;
@@ -40,8 +34,6 @@ def apply_custom_css():
                 border: 1px solid #E5E5E5;
                 margin-bottom: 15px;
             }
-            
-            /* 텍스트 폰트 컬러 최적화 */
             h1, h2, h3, h4 {
                 color: #2C3E50 !important;
                 font-weight: 700 !important;
@@ -159,7 +151,7 @@ def parse_sales_data(uploaded_file):
         return None
 
 # =====================================================================
-# [3단계] CRM 데이터 및 종합 분석 리포트
+# [3단계] CRM 데이터 처리 및 고도화된 AI 마케팅 분석 리포트
 # =====================================================================
 def parse_crm_data(uploaded_file):
     try:
@@ -176,6 +168,14 @@ def parse_crm_data(uploaded_file):
         for col in ['성별', '성공여부']:
             if col in crm_df.columns:
                 crm_df[col] = crm_df[col].astype(str).replace(r'\s+', '', regex=True)
+                
+        # [신규 추가] 가입일, 접수일 등을 찾아 '연도'를 추출하여 그룹화 지원
+        date_col = next((c for c in crm_df.columns if '일' in c and ('가입' in c or '접수' in c or '등록' in c)), None)
+        if date_col:
+            crm_df['연도'] = pd.to_datetime(crm_df[date_col], errors='coerce').dt.year
+        else:
+            crm_df['연도'] = "전체 기간"
+            
         return crm_df
     except Exception:
         return None
@@ -186,7 +186,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         return "선택하신 월의 실적 데이터가 충분하지 않습니다."
         
     latest = current_data.iloc[0]
-    analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 성과 인사이트"]
+    analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 성과 분석 요약"]
     
     prev_month_dt = latest['period'] - pd.DateOffset(months=1)
     prev_data_df = df[df['period'] == prev_month_dt]
@@ -204,21 +204,44 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     else:
         analysis_texts.append("- 이전 달의 유효한 데이터가 존재하지 않아 전월 대비 성과를 산출할 수 없습니다.")
         
-    if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별']):
-        try:
-            stats = crm_df.groupby(['연령대', '성별'])['성공여부'].apply(lambda x: (x == '성공').mean())
-            stats = stats.sort_values(ascending=False)
-            if not stats.empty:
-                best = stats.index[0]
-                best_rate = stats.iloc[0]
-                analysis_texts.append(
-                    f"- 주요 타겟 고객층: CRM 분석 결과, {best[0]} {best} 고객군의 성공율이 {best_rate:.1%}로 "
-                    f"가장 높게 측정되었습니다. 캠페인 진행 시 해당 타겟에 자원을 우선 배정할 것을 권장합니다."
-                )
-        except:
-            pass
+    # [신규 추가] CRM 데이터 연도별 세분화 및 전문가 수준 AI 마케팅 분석
+    if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별', '연도']):
+        analysis_texts.append("\n---\n#### 인구통계학적(Demographic) 코호트 전환율 분석")
+        
+        table_md = "| 분석 연도 | 최우수 전환 타겟 (최고 성공율) | 전환 취약 타겟 (최저 성공율) |\n|---|---|---|\n"
+        years = sorted([y for y in crm_df['연도'].unique() if pd.notna(y)])
+        
+        has_valid_stats = False
+        for y in years:
+            y_df = crm_df[crm_df['연도'] == y]
+            if y_df.empty: continue
             
-    return "\n\n".join(analysis_texts)
+            stats = y_df.groupby(['연령대', '성별'])['성공여부'].apply(lambda x: (x == '성공').mean())
+            stats = stats.sort_values(ascending=False)
+            
+            if not stats.empty and len(stats) >= 1:
+                best = stats.index[0]
+                best_rate = stats.iloc[0] * 100
+                
+                worst = stats.index[-1]
+                worst_rate = stats.iloc[-1] * 100
+                
+                y_label = f"{int(y)}년" if isinstance(y, (int, float)) else str(y)
+                table_md += f"| **{y_label}** | {best[0]} {best}성 ({best_rate:.1f}%) | {worst[0]} {worst}성 ({worst_rate:.1f}%) |\n"
+                has_valid_stats = True
+                
+        if has_valid_stats:
+            analysis_texts.append(table_md)
+            analysis_texts.append("\n#### 경영/데이터 마케팅 AI 인사이트 제언")
+            analysis_texts.append(
+                "1. **선택과 집중을 통한 LTV(고객생애가치) 극대화**: 전환율 최상위 코호트(Top-tier)는 고객 획득 비용(CAC) 회수율이 가장 우수한 핵심 세그먼트(Segment)입니다. "
+                "해당 타겟층을 대상으로 예산을 우선 배정(Resource Allocation)하여 록인(Lock-in) 및 업셀링(Up-selling) 전략을 공격적으로 전개할 것을 권장합니다.\n"
+                "2. **미드티어(Middle-tier) 넛지(Nudge) 캠페인 도입**: 성과 부진 또는 중간 수준의 전환율을 보이는 세그먼트에 대해서는 무리한 푸시 마케팅을 지양해야 합니다. "
+                "고객 여정(Customer Journey) 내 이탈이 발생하는 병목(Bottleneck) 구간을 정밀 분석하고, 개인화된 리타겟팅(Re-targeting) 및 A/B 테스트를 통해 "
+                "점진적인 전환율 개선(Conversion Rate Optimization)을 도모하는 STP 고도화 전략이 요구됩니다."
+            )
+            
+    return "\n".join(analysis_texts)
 
 # =====================================================================
 # [4단계] 대시보드 UI 구성
@@ -238,7 +261,6 @@ if sales_file:
     crm_df = parse_crm_data(crm_file) if crm_file else None
     
     if df is not None and not df.empty:
-        
         valid_periods = df[df['접수'] > 0]['period']
         default_period = valid_periods.max() if not valid_periods.empty else df['period'].max()
         
@@ -268,7 +290,6 @@ if sales_file:
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # [기능 추가] 숨기기/재표시가 가능한 Expander로 KPI 보드 구성
         with st.expander(f"{sel_main_y}년 {sel_main_m}월 핵심 성과 지표", expanded=True):
             kpi_cols = st.columns(4)
             for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
@@ -284,7 +305,6 @@ if sales_file:
         col1, col2 = st.columns([3.5, 6.5])
         
         with col1:
-            # 리포트 영역 Expander 적용
             with st.expander("데이터 분석 리포트", expanded=True):
                 st.markdown(generate_ai_analysis(df, selected_period, crm_df))
                 
@@ -297,7 +317,6 @@ if sales_file:
                         st.info(f"{row['year']}년 최고 실적: {row['period'].strftime('%m월')} (성공율 {row['성공율']:.1%})")
 
         with col2:
-            # 시각화 영역 Expander 적용
             with st.expander("지표별 트렌드 분석 (시각화)", expanded=True):
                 vis_col1, vis_col2 = st.columns(2)
                 with vis_col1:
