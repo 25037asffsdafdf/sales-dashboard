@@ -9,24 +9,17 @@ import traceback
 # =====================================================================
 
 def clean_string(val):
-    """셀의 모든 공백, 줄바꿈, 탭 등 불순물을 완벽히 제거하여 순수 텍스트만 반환"""
     if pd.isna(val): 
         return ""
     return str(val).replace(" ", "").replace("\n", "").replace("\t", "").replace("\r", "").strip()
 
 def parse_date_robustly(val, fallback_year):
-    """
-    엑셀의 날짜 데이터가 문자열, Datetime, 일련번호 등 어떤 형태이든 
-    에러 없이 완벽하게 연도(YYYY)와 월(MM)로 변환하는 함수
-    """
     if pd.isna(val):
         return None, fallback_year
         
-    # 1. 이미 날짜 객체(Datetime)인 경우
     if isinstance(val, (datetime, pd.Timestamp)):
         return pd.Timestamp(val.year, val.month, 1), val.year
         
-    # 2. 엑셀 특유의 숫자형 일련번호 날짜인 경우 (예: 45000)
     if isinstance(val, (int, float)) and 30000 < val < 70000:
         try:
             dt = pd.to_datetime(val, unit='D', origin='1899-12-30')
@@ -34,18 +27,15 @@ def parse_date_robustly(val, fallback_year):
         except Exception:
             pass
 
-    # 3. 텍스트 형태인 경우 (예: '25.1월', '2025년 1월', '1월')
     str_val = clean_string(val)
     if not str_val:
         return None, fallback_year
         
-    # 숫자만 전부 추출 (예: '2025년 1월' -> ['2025', '1'])
     nums = re.findall(r'\d+', str_val)
     
-    # [치명적 오류 수정 구간] 숫자가 2개 이상이면 무조건 첫번째를 연도, 두번째를 월로 취급
+    # [치명적 오류 수정 완료] 숫자가 2개 이상일 때 두 번째 숫자를 반드시 nums로 지정
     if len(nums) >= 2:
         try:
-            # 완벽히 수정된 부분: int(nums)가 아닌 int(nums)로 배열 요소 명확히 지정
             y = int(nums[0])
             m = int(nums) 
             
@@ -56,7 +46,6 @@ def parse_date_robustly(val, fallback_year):
         except Exception:
             pass
             
-    # 연도 기재 없이 숫자가 1개('1월')만 있을 경우 이전 열의 연도를 이어받음
     elif len(nums) == 1:
         try:
             m = int(nums[0])
@@ -68,7 +57,6 @@ def parse_date_robustly(val, fallback_year):
     return None, fallback_year
 
 def extract_numeric_value(val):
-    """엑셀 셀에서 특수기호, 텍스트가 섞여 있어도 순수 수치(Float)만 추출"""
     if pd.isna(val):
         return 0.0
         
@@ -76,8 +64,6 @@ def extract_numeric_value(val):
         return float(val)
         
     str_val = str(val).replace(",", "").strip()
-    
-    # 마이너스(-) 부호와 소수점(.)을 포함한 숫자 패턴만 정밀 추출
     match = re.search(r'[-+]?\d*\.?\d+', str_val)
     if match:
         try:
@@ -88,7 +74,6 @@ def extract_numeric_value(val):
     return 0.0
 
 def standardize_metric_name(raw_name):
-    """어떤 형태로 지표명이 적혀있든 시스템 표준 명칭으로 강제 통합"""
     clean_name = clean_string(raw_name)
     if not clean_name:
         return None
@@ -109,18 +94,16 @@ def standardize_metric_name(raw_name):
     return clean_name
 
 # =====================================================================
-# [2단계] 메인 매출 데이터 파싱 로직 (모든 변수 고려)
+# [2단계] 메인 매출 데이터 파싱 로직
 # =====================================================================
 
 def parse_sales_data(uploaded_file):
     try:
-        # 데이터 통로드
         df_raw = pd.read_excel(uploaded_file, header=None)
         
         anchor_r = -1
         anchor_c = -1
         
-        # 1. 2차원 매트릭스 탐색으로 '구분' 기준점 찾기 (최대 50x50 범위)
         max_r = min(50, len(df_raw))
         max_c = min(50, len(df_raw.columns))
         
@@ -134,14 +117,12 @@ def parse_sales_data(uploaded_file):
                 break
                 
         if anchor_r == -1:
-            st.error("엑셀 파일 인식 실패: 표의 좌측 상단 기준점이 될 '구분' 항목을 찾을 수 없습니다.")
+            st.error("엑셀 파일 인식 실패: 표의 기준점이 될 '구분' 항목을 찾을 수 없습니다.")
             return None
 
-        # 2. 기준점 우측으로 이동하며 유효한 날짜 컬럼 탐색
         parsed_dates = {}
         current_year = datetime.now().year
         
-        # '구분' 행과 그 위아래 1줄씩(총 3줄) 스캔하여 날짜를 찾음 (셀 병합 대비)
         search_rows = [anchor_r]
         if anchor_r > 0: search_rows.append(anchor_r - 1)
         if anchor_r + 1 < len(df_raw): search_rows.append(anchor_r + 1)
@@ -152,7 +133,7 @@ def parse_sales_data(uploaded_file):
                 dt, y = parse_date_robustly(df_raw.iat[r, c], current_year)
                 if dt is not None:
                     found_date = dt
-                    current_year = y # 연도 갱신
+                    current_year = y
                     break
             
             if found_date is not None:
@@ -162,7 +143,6 @@ def parse_sales_data(uploaded_file):
             st.error("데이터 추출 실패: 연도 및 월 형식의 날짜 데이터를 인식하지 못했습니다.")
             return None
 
-        # 3. 기준점 아래로 이동하며 지표와 수치 데이터 매핑
         records = []
         for r in range(anchor_r + 1, len(df_raw)):
             raw_metric = df_raw.iat[r, anchor_c]
@@ -183,27 +163,20 @@ def parse_sales_data(uploaded_file):
             st.error("데이터 추출 실패: 유효한 수치 데이터를 찾지 못했습니다.")
             return None
 
-        # 4. 데이터프레임 구조화 및 피벗
         df_long = pd.DataFrame(records)
-        
-        # 날짜와 지표가 중복될 경우 합산(sum) 처리하여 ValueError 원천 방지
         df_long = df_long.groupby(['period', 'metric'], as_index=False)['value'].sum()
-        
         df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
         
-        # 5. 필수 열(컬럼) 강제 생성 (KeyError 원천 방지)
         required_cols = ['접수', '컨택', '성공', '성공율', '설치완료']
         for col in required_cols:
             if col not in df_pivot.columns:
                 df_pivot[col] = 0.0
                 
-        # 6. 정렬 및 성공율 강제 재계산 (엑셀 서식 무시하고 시스템 기준으로 덮어쓰기)
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
         for idx, row in df_pivot.iterrows():
             접수 = row['접수']
             성공 = row['성공']
-            # 접수가 0 이상일 경우에만 성공/접수로 성공율 재계산
             calc_rate = (성공 / 접수) if 접수 > 0 else 0.0
             df_pivot.at[idx, '성공율'] = calc_rate
             
@@ -219,7 +192,6 @@ def parse_sales_data(uploaded_file):
 # =====================================================================
 
 def parse_crm_data(uploaded_file):
-    """CRM 고객 데이터 파일 파싱 (나이/연령대 자동 계산)"""
     try:
         crm_df = pd.read_excel(uploaded_file)
         crm_df.columns = [clean_string(col) for col in crm_df.columns]
@@ -240,14 +212,12 @@ def parse_crm_data(uploaded_file):
         return None
 
 def generate_ai_analysis(df, crm_df=None):
-    """대시보드 화면에 출력될 자동화 리포트 생성"""
     if df is None or df.empty: 
         return "분석 리포트를 생성할 수 있는 데이터가 부족합니다."
         
     latest = df.iloc[-1]
     analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 비즈니스 요약"]
     
-    # 전년 동월 데이터 탐색
     last_year_dt = latest['period'].replace(year=latest['period'].year - 1)
     ly_data = df[df['period'] == last_year_dt]
     
@@ -303,7 +273,6 @@ if sales_file:
         st.subheader(f"📍 {latest_data['period'].strftime('%Y년 %m월')} 월간 KPI (M-1 기준)")
         kpi_cols = st.columns(4)
         
-        # 상단 핵심 지표 표출
         for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
             val = latest_data[metric]
             delta = val - prev_data[metric] if prev_data is not None else 0
@@ -352,9 +321,5 @@ if sales_file:
         with st.expander("📄 데이터 원본 테이블 확인"): 
             st.dataframe(df.style.format({"성공율": "{:.2%}", "접수": "{:.0f}", "컨택": "{:.0f}", "성공": "{:.0f}", "설치완료": "{:.0f}"}))
             
-    else:
-        # 데이터프레임이 빈 값일 경우 (parse_sales_data 함수 내에서 이미 에러 출력함)
-        pass
 else:
     st.info("👈 좌측 사이드바에서 매출 데이터 엑셀 파일을 업로드하여 대시보드를 생성하십시오.")
-
