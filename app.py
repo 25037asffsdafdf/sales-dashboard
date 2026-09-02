@@ -40,7 +40,7 @@ def apply_custom_css():
     """, unsafe_allow_html=True)
 
 # =====================================================================
-# [1단계] 지표명 표준화
+# [1단계] 지표명 및 문자열 정제
 # =====================================================================
 def clean_string(val):
     if pd.isna(val): return ""
@@ -59,94 +59,103 @@ def standardize_metric_name(raw_name):
     return clean_name
 
 # =====================================================================
-# [2단계] 핵심 매출 데이터 파싱 (날짜 무결성 및 에러 복구)
+# [2단계] 핵심 매출 데이터 파싱 (오타 수정 및 에러 은폐 방지)
 # =====================================================================
 def parse_sales_data(uploaded_file):
     try:
         df_raw = pd.read_excel(uploaded_file, header=None).fillna("")
 
-        header_r, header_c = -1, -1
+        header_rows = []
+        anchor_c = -1
+        
+        # '구분' 기준점 스캔
         for r in range(min(50, len(df_raw))):
             for c in range(min(50, len(df_raw.columns))):
                 if "구분" in clean_string(df_raw.iat[r, c]):
-                    header_r, header_c = r, c
-                    break
-            if header_r != -1: break
-            
-        if header_r == -1:
-            st.error("데이터 인식 실패: 표 상단에 '구분' 항목을 찾을 수 없습니다.")
-            return None
-
-        parsed_dates = {}
-        fallback_y = datetime.now().year
+                    if r not in header_rows:
+                        header_rows.append(r)
+                        anchor_c = c
         
-        search_rows = [header_r]
-        if header_r > 0: search_rows.append(header_r - 1)
-        if header_r + 1 < len(df_raw): search_rows.append(header_r + 1)
-        
-        for c in range(header_c + 1, len(df_raw.columns)):
-            for r in search_rows:
-                val = df_raw.iat[r, c]
-                if pd.isna(val): continue
-                
-                if isinstance(val, (datetime, pd.Timestamp)):
-                    parsed_dates[c] = pd.Timestamp(val.year, val.month, 1)
-                    fallback_y = val.year
-                    break
-                    
-                str_val = clean_string(val)
-                nums = re.findall(r'\d+', str_val)
-                
-                if len(nums) >= 2:
-                    try:
-                        y = int(nums[0])
-                        m = int(nums) # [오류 완벽 수정] nums 명시!
-                        if y < 100: y += 2000
-                        if 2000 <= y <= 2100 and 1 <= m <= 12:
-                            parsed_dates[c] = pd.Timestamp(y, m, 1)
-                            fallback_y = y
-                            break
-                    except Exception: pass
-                elif len(nums) == 1:
-                    try:
-                        m = int(nums[0])
-                        if 1 <= m <= 12:
-                            parsed_dates[c] = pd.Timestamp(fallback_y, m, 1)
-                            break
-                    except Exception: pass
-                    
-        # [에러 알림 복구] 날짜 인식이 안 되면 알림 띄우기
-        if not parsed_dates:
-            st.error("데이터 추출 실패: 연도 및 월 형식의 날짜 데이터를 인식하지 못했습니다.")
+        if not header_rows:
+            st.error("데이터 인식 실패: 엑셀 표에서 '구분' 항목을 찾을 수 없습니다. 양식을 확인해주세요.")
             return None
 
         records = []
-        for r in range(header_r + 1, len(df_raw)):
-            metric = standardize_metric_name(df_raw.iat[r, header_c])
-            if not metric: continue
+        
+        # 다중 표(2025, 2026) 순회
+        for i, h_idx in enumerate(header_rows):
+            end_idx = header_rows[i+1] if i + 1 < len(header_rows) else len(df_raw)
+            block = df_raw.iloc[h_idx:end_idx]
             
-            for c, dt in parsed_dates.items():
-                str_val = str(df_raw.iat[r, c]).replace(",", "").strip()
-                match = re.search(r'[-+]?\d*\.?\d+', str_val)
-                try: val = float(match.group()) if match else 0.0
-                except: val = 0.0
-                records.append({'period': dt, 'metric': metric, 'value': val})
+            dates = {}
+            fallback_y = datetime.now().year
+            
+            # 날짜 열 스캔 및 파싱
+            for c in range(anchor_c + 1, len(df_raw.columns)):
+                d_val = str(block.iat[0, c]).replace(" ", "").replace(".0", "")
+                if not d_val or d_val == 'nan': continue
+                
+                nums = re.findall(r'\d+', d_val)
+                if not nums: continue
+                
+                num_str = "".join(nums)
+                y, m = -1, -1
+                
+                # 1. '202501' 처럼 6자리 숫자일 때 완벽 대응
+                if len(num_str) >= 6:
+                    y = int(num_str[:4])
+                    m = int(num_str[4:6])
+                # 2. '2025년 1월' 처럼 숫자가 떨어져 있을 때 (오타 수정 부분)
+                elif len(nums) >= 2:
+                    y = int(nums[0])
+                    m = int(nums) # !! 문제의 int(nums)를 int(nums)로 완전히 수정했습니다 !!
+                # 3. '1월' 처럼 월만 적혀있을 때
+                elif len(nums) == 1:
+                    m = int(nums[0])
+                    y = fallback_y
+                
+                # 날짜 최종 병합
+                if y != -1 and m != -1:
+                    if y < 100: y += 2000
+                    if 2000 <= y <= 2100 and 1 <= m <= 12:
+                        dates[c] = pd.Timestamp(y, m, 1)
+                        fallback_y = y
 
-        # [에러 알림 복구] 데이터가 없으면 하얀 화면 대신 알림 띄우기
-        if not records: 
-            st.error("데이터 추출 실패: 유효한 수치 데이터를 찾지 못했습니다.")
+            # 데이터가 추출되지 않으면 텅빈 하얀 화면 대신 에러를 띄우도록 원상복구
+            if not dates:
+                continue
+
+            for r_idx in range(1, len(block)):
+                metric = standardize_metric_name(block.iat[r_idx, anchor_c])
+                if not metric: continue
+                
+                for c, dt in dates.items():
+                    v_raw = str(block.iat[r_idx, c]).replace(",", "").strip()
+                    v_num = re.sub(r'[^\d.-]', '', v_raw)
+                    try:
+                        val = float(v_num) if v_num and v_num != '-' else 0.0
+                    except:
+                        val = 0.0
+                    records.append({'period': dt, 'metric': metric, 'value': val})
+
+        # 하얀 빈 화면 방지 장치
+        if not records:
+            st.error("데이터 추출 실패: 연/월 날짜 형식 또는 유효한 수치 데이터를 찾지 못했습니다.")
             return None
 
-        df_long = pd.DataFrame(records).groupby(['period', 'metric'], as_index=False)['value'].sum()
+        df_long = pd.DataFrame(records)
+        df_long = df_long.groupby(['period', 'metric'], as_index=False)['value'].last()
         df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
         
-        for col in ['접수', '컨택', '성공', '성공율', '설치완료']:
-            if col not in df_pivot.columns: df_pivot[col] = 0.0
+        for req in ['접수', '컨택', '성공', '성공율', '설치완료']:
+            if req not in df_pivot.columns: 
+                df_pivot[req] = 0.0
+            else:
+                df_pivot[req] = pd.to_numeric(df_pivot[req], errors='coerce').fillna(0.0)
                 
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
-        for idx, row in df_pivot.iterrows():
-            df_pivot.at[idx, '성공율'] = (row['성공'] / row['접수']) if row['접수'] > 0 else 0.0
-            
+        df_pivot['성공율'] = df_pivot.apply(lambda row: row['성공'] / row['접수'] if row.get('접수', 0) > 0 else 0.0, axis=1)
+        
         return df_pivot
         
     except Exception as e:
@@ -155,7 +164,7 @@ def parse_sales_data(uploaded_file):
         return None
 
 # =====================================================================
-# [3단계] CRM 데이터 처리 및 AI 리포트 (튜플 표기 완벽 수정)
+# [3단계] CRM 데이터 처리 및 학술적 AI 리포트
 # =====================================================================
 def parse_crm_data(uploaded_file):
     try:
@@ -221,18 +230,15 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
             stats = stats.sort_values(ascending=False)
             
             if not stats.empty and len(stats) >= 1:
-                best = stats.index[0]      # 예: ('20대', '남')
-                worst = stats.index[-1]
+                best = stats.index[0]
                 best_rate = stats.iloc[0] * 100
+                worst = stats.index[-1]
                 worst_rate = stats.iloc[-1] * 100
                 
-                # [오류 완벽 수정] 튜플 분해: best[0] = '20대', best = '남'
                 best_gender = best if str(best).endswith('성') else f"{best}성"
                 worst_gender = worst if str(worst).endswith('성') else f"{worst}성"
                 
                 y_label = f"{int(y)}년" if isinstance(y, (int, float)) else str(y)
-                
-                # 결과: 20대 남성 (72.2%)
                 table_md += f"| **{y_label}** | {best[0]} {best_gender} ({best_rate:.1f}%) | {worst[0]} {worst_gender} ({worst_rate:.1f}%) |\n"
                 has_valid_stats = True
                 
@@ -250,7 +256,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     return "\n".join(analysis_texts)
 
 # =====================================================================
-# [4단계] 대시보드 UI 구성
+# [4단계] 대시보드 UI 및 차트 구성
 # =====================================================================
 st.set_page_config(layout="wide", page_title="현대렌탈케어 고객만족센터 매출관리 대시보드")
 apply_custom_css()
@@ -368,8 +374,6 @@ if sales_file:
                             annotations=[dict(x=0, y=1.15, xref='paper', yref='paper', text=f"<b>{target_metric}</b> {'(%)' if target_metric == '성공율' else '(건)'}", showarrow=False, font=dict(size=14, color='#555555'), xanchor='left', yanchor='bottom')]
                         )
                         st.plotly_chart(fig, use_container_width=True)
-                        if target_metric == '성공율':
-                            st.caption("※ 성공율은 가시성을 위해 백분율(%) 스케일로 출력됩니다.")
                     else:
                         st.warning("해당 기간에 차트를 구성할 데이터가 없습니다.")
         
@@ -378,5 +382,8 @@ if sales_file:
             display_df['조회월'] = display_df['period'].dt.strftime('%Y-%m')
             st.dataframe(display_df.set_index('조회월').drop(columns=['period']).style.format({"성공율": "{:.2%}", "접수": "{:.0f}", "컨택": "{:.0f}", "성공": "{:.0f}", "설치완료": "{:.0f}"}))
             
+    else:
+        # st.error 메시지는 parse_sales_data 내부에서 출력됩니다.
+        pass
 else:
     st.info("좌측 메뉴에서 매출 데이터를 업로드하여 대시보드를 시작해주십시오.")
