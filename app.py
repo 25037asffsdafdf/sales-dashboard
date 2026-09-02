@@ -31,26 +31,28 @@ def parse_sales_data(uploaded_file):
         # 열을 이동하며 날짜 데이터 추출
         for c in range(header_c + 1, len(df_raw.columns)):
             date_val = str(df_raw.iat[header_r, c]).replace(" ", "")
-            if not date_val: continue
+            if not date_val or date_val == 'nan': continue
             
             nums = re.findall(r'\d+', date_val)
             
-            # [방어 로직] 리스트 내부 접근 시 에러가 나지 않도록 try-except로 감쌈
+            # 숫자(연/월)가 2개 이상 발견되었을 경우
             if len(nums) >= 2:
                 try:
-                    year = int(nums[0])
-                    month = int(nums) # 확실하게 수정된 부분입니다.
+                    # 문제의 원인이었던 오타를 확실하게 수정했습니다 (nums 적용)
+                    y_val = int(nums[0])
+                    m_val = int(nums)
                     
-                    if year < 100: year += 2000
-                    if 2000 <= year <= 2100 and 1 <= month <= 12:
-                        parsed_dates[c] = pd.Timestamp(year, month, 1)
+                    if y_val < 100: y_val += 2000
+                    if 2000 <= y_val <= 2100 and 1 <= m_val <= 12:
+                        parsed_dates[c] = pd.Timestamp(y_val, m_val, 1)
                 except Exception:
-                    continue # 에러 발생 시 해당 열은 건너뛰고 다음 열 진행
+                    continue 
+            # 숫자가 1개(월)만 있을 경우
             elif len(nums) == 1:
                 try:
-                    month = int(nums[0])
-                    if 1 <= month <= 12:
-                        parsed_dates[c] = pd.Timestamp(datetime.now().year, month, 1)
+                    m_val = int(nums[0])
+                    if 1 <= m_val <= 12:
+                        parsed_dates[c] = pd.Timestamp(datetime.now().year, m_val, 1)
                 except Exception:
                     continue
 
@@ -61,7 +63,7 @@ def parse_sales_data(uploaded_file):
         records = []
         for r in range(header_r + 1, len(df_raw)):
             metric_raw = str(df_raw.iat[r, header_c]).replace(" ", "").replace("\n", "")
-            if not metric_raw: continue
+            if not metric_raw or metric_raw == 'nan': continue
             
             if '접수' in metric_raw and ('비' in metric_raw or '比' in metric_raw or '율' in metric_raw): metric = '성공율'
             elif '성공' in metric_raw and '율' in metric_raw: metric = '성공율'
@@ -93,7 +95,7 @@ def parse_sales_data(uploaded_file):
                 
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         
-        # 엑셀의 성공율 텍스트/숫자 서식 오류를 무시하고 시스템에서 강제 계산
+        # 엑셀의 성공율 서식 오류를 무시하고 시스템에서 강제 계산
         df_pivot['성공율'] = df_pivot.apply(
             lambda row: row['성공'] / row['접수'] if row.get('접수', 0) > 0 else 0.0, axis=1
         )
