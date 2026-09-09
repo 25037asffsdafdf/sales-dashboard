@@ -5,9 +5,10 @@ import re
 import traceback
 import plotly.express as px
 
-# =====================================================
+# =====================================================================
 # [0단계] 고급 디자인 커스텀 CSS
-# ===================================def apply_custom_css():
+# =====================================================================
+def apply_custom_css():
     st.markdown("""
         <style>
             .stApp { background-color: #F9F9F6; }
@@ -112,7 +113,7 @@ def standardize_metric_name(raw_name):
 
 # =====================================================================
 # [2단계] 핵심 매출 데이터 파싱
-# =============================================
+# =====================================================================
 def parse_sales_data(uploaded_file):
     try:
         df_raw = pd.read_excel(uploaded_file, header=None).fillna("")
@@ -190,7 +191,7 @@ def parse_sales_data(uploaded_file):
         st.error(f"시스템 오류 발생: {str(e)}")
         return None
 
-# =============================================
+# =====================================================================
 # [3단계] CRM 데이터 파싱
 # =====================================================================
 def parse_crm_data(uploaded_file):
@@ -209,7 +210,7 @@ def parse_crm_data(uploaded_file):
     except Exception: return None
 
 # =====================================================================
-# [4단계] 100-Case 매트릭스 엔진 (5x5x4 조합 로컬 코딩)
+# [4단계] 100-Case 다차원 매트릭스 리포트 엔진
 # =====================================================================
 def generate_ai_analysis(df, selected_period, crm_df=None):
     current_data = df[df['period'] == selected_period]
@@ -266,53 +267,53 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         yoy_lvl, yoy_text = "실적 미흡", f"작년 평균비 {yoy_diff_p:+.1f}%p"
 
     # ==============================================================================
-    # 🧠 100-Case 동적 조립 알고리즘 (V 5종 × R 5종 × Y 4종 = 100가지 유니크 출력)
+    # 🧠 모듈형 조립 알고리즘 (V 5종 × R 5종 × Y 4종 = 100가지 상황별 동적 출력)
     # ==============================================================================
     
-    # [블록 A: 25가지 시장 진단 및 이론 매핑 (V × R)]
+    # [블록 A: 시장 상태 진단 및 이론 매핑]
     if "증가" in v_lvl:
         if "개선" in r_lvl:
             theory = "LTV(고객생애가치) 극대화 모델"
             theory_rationale = "접수량과 전환 효율이 동반 상승하는 '확장기'입니다. 자원의 보수적 통제보다 점유율 선점을 위한 공격적 예산 투입이 절대적으로 유리한 시점입니다."
-            diagnosis = f"신규 접수가 {v_lvl}함과 동시에 최종 성공율 역시 {r_lvl}하고 있는 최상의 선순환 구조입니다."
+            diagnosis = f"신규 접수가 <b>[{v_lvl}]</b>함과 동시에 성공율 역시 <b>[{r_lvl}]</b>하고 있는 최상의 선순환 구조입니다."
         elif "하락" in r_lvl:
             theory = "영업 퍼널(Funnel) 병목 최적화"
             theory_rationale = "접수 유입은 늘었으나 최종 계약이 꺾이는 전형적인 마찰(Friction) 현상입니다. 모객 외형 확대보다 영업 전환 구조의 내부 결함을 우선 치유해야 합니다."
-            diagnosis = f"신규 접수는 {v_lvl}했으나 최종 성공율은 오히려 {r_lvl} 중입니다. 영업 퍼널 곳곳에 고객 유실 요인이 심각하게 작동하고 있습니다."
+            diagnosis = f"신규 접수는 <b>[{v_lvl}]</b>했으나 최종 성공율은 오히려 <b>[{r_lvl}]</b> 중입니다. 영업 퍼널 곳곳에 고객 유실 요인이 작동하고 있습니다."
         else:
             theory = "업셀링(Up-selling) 및 추가 가치 제안"
             theory_rationale = "유입량은 원활하나 효율이 정체되어 있습니다. 가망 고객의 구매 의사결정을 촉발시킬 '결정적 트리거(프로모션 등)'가 부재한 상태입니다."
-            diagnosis = f"신규 접수 건수가 {v_lvl}하고 있으나, 성공율은 {r_lvl} 상태를 면하지 못해 추가적인 도약 지점을 찾지 못하고 있습니다."
+            diagnosis = f"신규 접수 건수가 <b>[{v_lvl}]</b>하고 있으나, 성공율은 <b>[{r_lvl}]</b> 상태를 면하지 못해 추가적인 도약 지점을 찾지 못하고 있습니다."
             
     elif "감소" in v_lvl:
         if "개선" in r_lvl:
             theory = "파레토 법칙 (80/20 집중 타겟팅)"
             theory_rationale = "모객량은 줄었으나 체결율이 높아진 것은 타겟 정교화가 적중했음을 시사합니다. 대중 광고비를 삭감하고 진성 타겟 위주로 자원을 효율화하는 것이 타당합니다."
-            diagnosis = f"신규 접수량은 {v_lvl}했으나 세일즈 집중력 상승으로 성공율은 오히려 {r_lvl}했습니다. 허수 유입이 필터링된 결과입니다."
+            diagnosis = f"신규 접수량은 <b>[{v_lvl}]</b>했으나 세일즈 집중력 상승으로 성공율은 오히려 <b>[{r_lvl}]</b>했습니다. 허수 유입이 성공적으로 필터링되었습니다."
         elif "하락" in r_lvl:
             theory = "손실 회피(Loss Aversion) 진입 장벽 완화"
             theory_rationale = "유입량과 체결율이 동반 붕괴하는 더블 딥 상황입니다. 고객이 느끼는 초기 재무적 장벽이나 약정 부담을 파격적으로 해제해야만 반등이 가능합니다."
-            diagnosis = f"신규 접수량과 성공율이 동시에 {v_lvl}/{r_lvl}하는 위기 상황입니다. 비즈니스 활력 자체가 심각하게 침체되어 있습니다."
+            diagnosis = f"신규 접수량과 성공율이 동시에 <b>[{v_lvl}]/[{r_lvl}]</b>하는 위기 상황입니다. 비즈니스 활력 자체가 심각하게 침체되어 있습니다."
         else:
             theory = "마케팅 채널 피로도 진단 및 믹스 다변화"
             theory_rationale = "효율은 보합권에서 방어 중이나 유입 통로 자체가 마르고 있습니다. 기존 광고 매체의 피로도 누적이 원인이므로 신규 트래픽 채널 발굴이 시급합니다."
-            diagnosis = f"성공율 효율은 보합권에서 방어 중이나, 신규 접수량 자체가 {v_lvl}하고 있어 장기적인 모객 저하가 예측됩니다."
+            diagnosis = f"성공율 효율은 방어 중이나, 신규 접수량 자체가 <b>[{v_lvl}]</b>하고 있어 장기적인 모객 저하가 예측됩니다."
             
     else: # 보합
         if "개선" in r_lvl:
             theory = "영업 접점(MOT) 전환 효율성 고도화"
             theory_rationale = "모객은 멈춰 있으나 영업 사원의 체결 능력이 극대화된 상태입니다. 스크립트 최적화 및 영업 인센티브 체계를 강화하여 효율을 끝까지 쥐어짜야 합니다."
-            diagnosis = f"접수량은 {v_lvl} 중이나 내부 영업력 강화를 통해 성공율을 {r_lvl}시키며 실적 방어에 성공하고 있습니다."
+            diagnosis = f"접수량은 <b>[{v_lvl}]</b> 중이나 내부 영업력 강화를 통해 성공율을 <b>[{r_lvl}]</b>시키며 실적 방어에 성공하고 있습니다."
         elif "하락" in r_lvl:
             theory = "제품 경쟁력 및 CVP(고객가치제안) 재수립"
             theory_rationale = "모객은 평이한데 체결이 무너지는 것은 상품 자체의 매력도가 떨어졌음을 의미합니다. 근본적인 상품 패키징이나 가격 혜택을 재정비해야 합니다."
-            diagnosis = f"접수량은 {v_lvl} 상태이나 성공율이 {r_lvl}하며 기존 상품 라인업의 시장 소구력이 약화되고 있습니다."
+            diagnosis = f"접수량은 <b>[{v_lvl}]</b> 상태이나 성공율이 <b>[{r_lvl}]</b>하며 기존 상품 라인업의 시장 소구력이 약화되고 있습니다."
         else:
             theory = "STP(시장세분화) 마이크로 포지셔닝"
-            theory_rationale = "양적/질적 지표가 모두 장기 횡보하는 것은 기존 모델의 수명이 다했음을 의미합니다. 특정 라이프스타일(1인 가구 등)에 맞춘 틈새 시장을 개척해야 합니다."
-            diagnosis = f"접수 수량과 가입 성공율 모두 뚜렷한 변동 없는 {v_lvl} 및 {r_lvl} 상태입니다. 전체 실적이 고착화되었습니다."
+            theory_rationale = "양적/질적 지표가 모두 장기 횡보하는 것은 기존 모델의 수명이 다했음을 의미합니다. 특정 라이프스타일에 맞춘 틈새 시장을 개척해야 합니다."
+            diagnosis = f"접수 수량과 가입 성공율 모두 뚜렷한 변동 없는 <b>[{v_lvl}]</b> 및 <b>[{r_lvl}]</b> 상태입니다. 전체 실적이 고착화되었습니다."
 
-    # [블록 B: 100가지 액션 조립 (25개 진단 × 4개 YoY 성과 결합)]
+    # [블록 B: 전년비 성과 결합에 따른 최종 액션 지침 조립]
     if "초과" in yoy_lvl:
         action_title = f"성과 초과 달성에 따른 [{theory}] 전략 전면 확대"
         action_detail = (
@@ -334,11 +335,11 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     else:
         action_title = f"기준점 재수립 및 [{theory}] 중심의 영업 전략 구축"
         action_detail = (
-            f"1. 신뢰할 수 있는 전년도 평균 데이터가 누락되어 당월 단독 흐름을 기반으로 분석을 진행했습니다.<br>"
+            f"1. 비교를 위한 작년 데이터가 확인되지 않아 당월 단독 수치만으로 리포트를 발행합니다.<br>"
             f"2. 현재의 실적을 새로운 베이스라인(Baseline)으로 삼고, 위 진단에 부합하는 타겟 대응 매뉴얼을 수립하십시오."
         )
 
-    # --- [부가 정보: CRM 코호트 특성 (본류와 분리된 추가 통찰)] ---
+    # --- [부가 정보: CRM 코호트 특성 (분리된 추가 통찰)] ---
     c_text = "CRM 데이터 연동 시, 주력 고객군과 취약 고객군을 자동 판별합니다."
     if crm_df is not None and not crm_df.empty:
         try:
@@ -348,7 +349,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 if not stats.empty and len(stats) > 0:
                     best = stats.index[0]
                     worst = stats.index[-1]
-                    c_text = f"현재 당사의 계약 체결이 가장 수월한 최우��� 타겟은 <b>[{best[0]} {best}]</b>이며, 영업 마찰이 가장 심각한 취약 타겟은 <b>[{worst[0]} {worst}]</b>로 분석되었습니다."
+                    c_text = f"현재 계약 체결이 가장 수월한 최우수 타겟은 <b>[{best[0]} {best}]</b>이며, 영업 마찰이 가장 심각한 취약 타겟은 <b>[{worst[0]} {worst}]</b>로 분석되었습니다."
         except: pass
 
     return {
@@ -430,7 +431,7 @@ if sales_file:
         
         if ai_output:
             with report_col:
-                with st.expander("📊 AI 경영진단 요약 보고서", expanded=True):
+                with st.expander("📊 100-Case 자동 진단 요약 보고서", expanded=True):
                     # 1. 100-Case 조합 결론 액션 타이틀
                     st.markdown(f"<div class='action-highlight-box'>📢 **핵심 경영 지침:** {ai_output['action_title']}</div>", unsafe_allow_html=True)
                     
@@ -456,7 +457,7 @@ if sales_file:
                                         <div class='trend'>{ai_output['yoy_change']}</div>
                                     </div>""", unsafe_allow_html=True)
                     
-                    # 3. 25가지 진단 블록 및 100가지 액션 결합 문장 출력
+                    # 3. 진단 블록 및 액션 결합 문장 출력
                     st.markdown(f"<div class='diagnosis-box'><strong>💡 [종합 진단]</strong><br>{ai_output['diagnosis']}</div>", unsafe_allow_html=True)
                     
                     st.markdown("<b>[실무 부서 세부 실행 방안]</b>", unsafe_allow_html=True)
@@ -468,26 +469,25 @@ if sales_file:
                         st.markdown(f"<div class='detail-box'>{ai_output['c_text']}</div>", unsafe_allow_html=True)
             
             with pop_col:
-                with st.expander("🔍 데이터 판단 근거 및 적용 이론", expanded=False):
-                    # 취약한 마크다운 문법(물결 등) 완전 배제, 안전한 리스트로 구성
+                with st.expander("🔍 시스템 판단 근거 및 적용 이론", expanded=False):
                     criteria_md = f"""
-                    **[시스템 100-Case 자동 조립 기준표]**
+                    **[시스템 100-Case 로컬 조립 기준표]**
                     
-                    본 보고서는 5(양적) × 5(질적) × 4(성과) = 총 100가지의 경우의 수 중 최적 매트릭스를 로컬 연산하여 도출합니다.
+                    본 보고서는 5(양적) × 5(질적) × 4(성과) = 총 100가지의 경우의 수 중 데이터에 부합하는 최적의 매트릭스를 로컬 연산하여 도출합니다.
                     
                     **1. 양적 지표 (접수 건수 변동)**
                     - 산식: 전월 대비 증감률 ({ai_output['rec_change_pct']*100:+.1f}%)
-                    - 판정 범위: 대폭 증가(+15% 이상) / 점진 증가(+2% 이상) / 보합(-5% 내외) / 점진 감소(-15% 이하) / 대폭 감소(-15% 미만)
+                    - 판정 기준: 대폭 증가(+15% 이상) / 점진 증가(+2% 이상) / 보합(-5% 내외) / 점진 감소(-15% 이하) / 대폭 감소(-15% 미만)
                     - 당월 시스템 판정: **{ai_output['v_lvl']}**
                     
                     **2. 질적 지표 (당월 성공율 변동폭)**
                     - 산식: 전월 대비 증감 포인트 ({ai_output['rate_diff_p']:+.2f}%p)
-                    - 판정 범위: 대폭 개선(+3%p 이상) / 점진 개선(+0.5%p 이상) / 보합(-0.5%p 내외) / 점진 하락(-3.0%p 이하) / 대폭 하락(-3.0%p 미만)
+                    - 판정 기준: 대폭 개선(+3%p 이상) / 점진 개선(+0.5%p 이상) / 보합(-0.5%p 내외) / 점진 하락(-3.0%p 이하) / 대폭 하락(-3.0%p 미만)
                     - 당월 시스템 판정: **{ai_output['r_lvl']}**
                     
                     **3. 성과 지표 (전년 전체 평균 대비 당월 성공율)**
-                    - 산식: 당월 성공율({ai_output['success_rate']*100:.1f}%) 마이너스 작년 연간 평균 성공율({ai_output['avg_success_rate_prev_year']*100:.1f}%) = {ai_output['yoy_diff_p']:+.2f}%p
-                    - 판정 범위: 초과 달성(+2.0%p 이상) / 유사 수준 보합(-2.0%p 부터 +2.0%p) / 실적 미흡(-2.0%p 미만)
+                    - 산식: 당월 성공율({ai_output['success_rate']*100:.1f}%) - 작년 연간 평균 성공율({ai_output['avg_success_rate_prev_year']*100:.1f}%) = {ai_output['yoy_diff_p']:+.2f}%p
+                    - 판정 기준: 초과 달성(+2.0%p 이상) / 유사 수준 보합(-2.0%p ~ +2.0%p) / 실적 미흡(-2.0%p 미만)
                     - 당월 시스템 판정: **{ai_output['yoy_lvl']}**
                     
                     **4. 적용된 마케팅 학술 이론 및 매핑 사유**
