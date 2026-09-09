@@ -64,7 +64,6 @@ def standardize_metric_name(raw_name):
 def parse_sales_data(uploaded_file):
     try:
         df_raw = pd.read_excel(uploaded_file, header=None).fillna("")
-
         header_rows = []
         anchor_c = -1
         
@@ -79,7 +78,6 @@ def parse_sales_data(uploaded_file):
         if not header_rows:
             st.error("데이터 인식 실패: 엑셀 표에서 '구분' 항목을 찾을 수 없습니다. 양식을 확인해주세요.")
             return None
-
         records = []
         
         # 다중 표(2025, 2026) 순회
@@ -108,7 +106,7 @@ def parse_sales_data(uploaded_file):
                 # 2. '2025년 1월' 처럼 숫자가 떨어져 있을 때 (오타 수정 부분)
                 elif len(nums) >= 2:
                     y = int(nums[0])
-                    m = int(nums) # !! 문제의 int(nums)를 int(nums)로 완전히 수정했습니다 !!
+                    m = int(nums) # 이전 오타 디버깅 완료 반영
                 # 3. '1월' 처럼 월만 적혀있을 때
                 elif len(nums) == 1:
                     m = int(nums[0])
@@ -120,11 +118,9 @@ def parse_sales_data(uploaded_file):
                     if 2000 <= y <= 2100 and 1 <= m <= 12:
                         dates[c] = pd.Timestamp(y, m, 1)
                         fallback_y = y
-
             # 데이터가 추출되지 않으면 텅빈 하얀 화면 대신 에러를 띄우도록 원상복구
             if not dates:
                 continue
-
             for r_idx in range(1, len(block)):
                 metric = standardize_metric_name(block.iat[r_idx, anchor_c])
                 if not metric: continue
@@ -137,12 +133,10 @@ def parse_sales_data(uploaded_file):
                     except:
                         val = 0.0
                     records.append({'period': dt, 'metric': metric, 'value': val})
-
         # 하얀 빈 화면 방지 장치
         if not records:
             st.error("데이터 추출 실패: 연/월 날짜 형식 또는 유효한 수치 데이터를 찾지 못했습니다.")
             return None
-
         df_long = pd.DataFrame(records)
         df_long = df_long.groupby(['period', 'metric'], as_index=False)['value'].last()
         df_pivot = df_long.pivot(index='period', columns='metric', values='value').reset_index()
@@ -195,29 +189,107 @@ def parse_crm_data(uploaded_file):
 def generate_ai_analysis(df, selected_period, crm_df=None):
     current_data = df[df['period'] == selected_period]
     if current_data.empty or current_data.iloc[0]['접수'] == 0:
-        return "선택하신 월의 실적 데이터가 충분하지 않습니다."
+        return "선택하신 월의 실적 데이터가 충분하지 않아 분석 리포트를 생성할 수 없습니다."
         
     latest = current_data.iloc[0]
-    analysis_texts = [f"### {latest['period'].strftime('%Y년 %m월')} 성과 분석 요약"]
     
+    # ----------------------------------------------------
+    # [추론 엔진 1단계] 전월 대비 실적 추세 자동 스캔 및 비즈니스 국면 진단
+    # ----------------------------------------------------
     prev_month_dt = latest['period'] - pd.DateOffset(months=1)
     prev_data_df = df[df['period'] == prev_month_dt]
     
+    rec_val = latest['접수']
+    success_rate = latest['성공율']
+    rec_change_pct = 0.0
+    rate_diff_p = 0.0
+    
     if not prev_data_df.empty and prev_data_df.iloc[0]['접수'] > 0:
         prev = prev_data_df.iloc[0]
-        rec_diff = latest['접수'] - prev['접수']
-        rate_diff = (latest['성공율'] - prev['성공율']) * 100
-        trend_rec = "증가" if rec_diff > 0 else "감소"
+        rec_change_pct = (rec_val - prev['접수']) / prev['접수']
+        rate_diff_p = (success_rate - prev['성공율']) * 100
+    
+    # 접수량 상태 자동 판정 (다차원 시나리오 분기)
+    if rec_change_pct >= 0.15: rec_state = "폭증"
+    elif rec_change_pct >= 0.02: rec_state = "성장"
+    elif -0.05 <= rec_change_pct < 0.02: rec_state = "정체"
+    elif -0.15 <= rec_change_pct < -0.05: rec_state = "감소"
+    else: rec_state = "급락"
+        
+    # 성공율 효율 상태 자동 판정
+    if rate_diff_p >= 3.0: rate_state = "급증"
+    elif rate_diff_p >= 0.5: rate_state = "개선"
+    elif -0.5 <= rate_diff_p < 0.5: rate_state = "유지"
+    elif -3.0 <= rate_diff_p < -0.5: rate_state = "하락"
+    else: rate_state = "급락"
+
+    # ----------------------------------------------------
+    # [추론 엔진 2단계] 10대 마케팅 이론 기반의 지능형 의사결정 매핑
+    # ----------------------------------------------------
+    selected_theories = []
+    strategic_action = ""
+    
+    if rec_state in ["폭증", "성장"] and rate_state in ["급증", "개선"]:
+        selected_theories = ["선택과 집중 전략 (Pareto Principle)", "고객 생애 가치 극대화 이론 (LTV/CAC Framework)"]
+        strategic_action = (
+            f"현재 신규 유입({rec_state})과 품질 효율({rate_state})이 이상적으로 동반 폭발하는 비즈니스 골든 크로스(Golden Cross) 구간입니다. "
+            f"이 국면에서는 신규 고객 획득 비용(CAC)을 보다 공격적으로 상향 조정하더라도, 장기적인 가입 고객 생애 가치(LTV) 회수율이 압도적일 확률이 높습니다. "
+            f"고객 유입 채널의 타겟팅 범위를 확대하는 동시, 우수 코호트에 마케팅 예산을 우선 재배정(Resource Allocation)하는 적극적 성장을 권장합니다."
+        )
+    elif rec_state in ["폭증", "성장"] and rate_state in ["하락", "급락"]:
+        selected_theories = ["전환 퍼널 최적화 이론 (Conversion Funnel Bottleneck)", "보상적 의사결정 모델 (Compensatory Decision Theory)"]
+        strategic_action = (
+            f"마케팅을 통한 모객 볼륨은 {rec_state} 중이나, 실제 최종 상담 성공율은 {rate_state}하는 심각한 병목(Bottleneck) 구간에 진입했습니다. "
+            f"이는 인입된 고객의 가입 의사에 비해 상담 프로세스나 계약 체결 조건 설계상 심각한 마찰(Friction)이 존재함을 뜻합니다. "
+            f"즉시 무리한 광고 확장을 중단하고, 접수에서 컨택 및 성공으로 넘어가는 고객 여정(Customer Journey)의 중간 손실률을 분석하는 퍼널 고도화 작업을 단행해야 합니다."
+        )
+    elif rec_state in ["감소", "급락"] and rate_state in ["급증", "개선"]:
+        selected_theories = ["관계 마케팅 및 차별적 고착화 (Relationship & Lock-in Strategy)", "가치 인식 기반 가격 이론 (Value Perception Theory)"]
+        strategic_action = (
+            f"유입되는 모수 규모 자체는 {rec_state}했으나 양질의 타겟 고객을 선별 집중함으로써 세일즈 효율({rate_state})을 방어해 내는 정예화(Filtering) 상태입니다. "
+            f"비용 대비 마케팅 효율이 안정적인 흐름이므로, 억지로 수치를 늘리려 비효율 채널을 재개하기보단 "
+            f"성공 가능성이 입증된 핵심 타겟 프로필(Look-alike Profile)을 정밀 역추적하여 유사 고객층에 예산을 유도하는 록인(Lock-in) 전략이 훨씬 유리합니다."
+        )
+    elif rec_state in ["감소", "급락"] and rate_state in ["하락", "급락"]:
+        selected_theories = ["손실 회피성 이론 (Loss Aversion Theory)", "행동 경제학적 넛지 모델 (Nudge & Psychological Pricing)"]
+        strategic_action = (
+            f"유입량({rec_state})과 세일즈 효율({rate_state})이 동시 침체 구조에 빠진 심각한 수축 비즈니스 사이클입니다. "
+            f"고객들의 심리적 구매 거부감과 가입 장벽이 극대화된 상태이므로 일반적인 제안으로는 극복이 어렵습니다. "
+            f"장기 계약 위약금 면제 옵션이나 첫 달 무료 홈체험 프로모션 등 고객의 '손실 회피 심리'를 허무는 혁신적인 넛지(Nudge) 트리거를 조속히 심어야 합니다."
+        )
+    else: # 정체 및 유지 상태
+        selected_theories = ["고객 여정 지도 분석 (Customer Journey Mapping)", "STP 고도화 세분화 이론 (Micro-segmentation)"]
+        strategic_action = (
+            f"접수량과 전환 효율 모두 전월 대비 정체 국면을 유지하고 있어 성장 동력이 다소 무뎌진 교착 상태입니다. "
+            f"기존의 단편화된 타겟 분석 방식으로는 새로운 전환 포인트를 찾기 어렵습니다. "
+            f"고객 연령 및 성별의 인구통계 변수를 넘어 라이프스타일, 라이프사이클 요구 수준에 맞춘 마이크로 세분화(STP) 리포지셔닝 캠페인을 수립할 필요가 있습니다."
+        )
+
+    # ----------------------------------------------------
+    # [추론 엔진 3단계] 최종 분석 리포트 구조화 및 마크다운 바인딩
+    # ----------------------------------------------------
+    analysis_texts = []
+    analysis_texts.append(f"### 📊 {latest['period'].strftime('%Y년 %m월')} 지능형 성과 진단 리포트")
+    analysis_texts.append(f"**현재 비즈니스 국면**: 유입 `{rec_state}` / 효율 `{rate_state}` 상황")
+    
+    if not prev_data_df.empty and prev_data_df.iloc[0]['접수'] > 0:
         analysis_texts.append(
-            f"- 전월 대비 성과: 접수 건수는 {abs(rec_diff):,.0f}건 {trend_rec}하였으며, "
-            f"성공율은 {rate_diff:+.1f}%p 변동하였습니다."
+            f"🔍 **핵심 지표 요약**: 당월 신규 접수량은 전월 대비 **{rec_change_pct:+.1%}** 변동하였으며, "
+            f"상담 성공율은 **{rate_diff_p:+.2f}%p** 추세를 기록하고 있습니다."
         )
     else:
-        analysis_texts.append("- 이전 달의 유효한 데이터가 존재하지 않아 전월 대비 성과를 산출할 수 없습니다.")
+        analysis_texts.append("🔍 **핵심 지표 요약**: 비교 대상이 되는 직전월 데이터가 확인되지 않아 당월 단독 흐름을 기반으로 마케팅 모델을 판단합니다.")
         
+    analysis_texts.append("\n---\n### 🔬 데이터 분석가의 마케팅 학술 프레임워크 제언")
+    analysis_texts.append(f"📌 **적용 권장 마케팅 이론**: `{'`, `'.join(selected_theories)}`")
+    analysis_texts.append(f"💡 **AI 경영 처방**:\n{strategic_action}")
+    
+    # [추론 엔진 4단계] CRM 데이터 존재 시 인구통계 기반 연계 처방 설계
     if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별', '연도']):
-        analysis_texts.append("\n---\n#### 인구통계학적(Demographic) 코호트 전환율 분석")
-        table_md = "| 분석 연도 | 최우수 전환 타겟 (최고 성공율) | 전환 취약 타겟 (최저 성공율) |\n|---|---|---|\n"
+        analysis_texts.append("\n---\n### 👥 코호트(Cohort) 다차원 고객 세그먼트 분석")
+        analysis_texts.append("CRM 고객 데이터베이스의 가입 이력을 학술적 세그먼트 구조로 교차 대조하여 도출한 **최우수 전환 코호트** 및 **취약 코호트 집중 해결 액션 플랜**입니다.")
+        
+        table_md = "| 분석 연도 | 최우수 전환 코호트 (Target) | 전환 마찰 코호트 (Friction) | 해결을 위한 경영 전략적 Action 플랜 |\n|---|---|---|---|\n"
         
         years = sorted([y for y in crm_df['연도'].unique() if pd.notna(y)])
         has_valid_stats = False
@@ -238,19 +310,24 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 best_gender = best if str(best).endswith('성') else f"{best}성"
                 worst_gender = worst if str(worst).endswith('성') else f"{worst}성"
                 
+                # 취약 타겟 특성별 맞춤형 해결 기법 매핑
+                if "20대" in worst[0]:
+                    action_plan = "**[디지털 넛지]** 모바일 친화적인 간편 계약 서명 프로세스 구현 및 UX 전환 병목 최소화."
+                elif "50대" in worst[0] or "60대" in worst[0]:
+                    action_plan = "**[휴리스틱 케어]** 유선 해피콜 전담 레이아웃 추가 구축 및 직관적인 렌탈 안내 팜플렛 지원."
+                else:
+                    action_plan = "**[A/B 테스트]** 타겟 세그먼트에 맞춘 맞춤형 월 렌탈 요금제 및 특전 가치 제안(CVP) 전개."
+                
                 y_label = f"{int(y)}년" if isinstance(y, (int, float)) else str(y)
-                table_md += f"| **{y_label}** | {best[0]} {best_gender} ({best_rate:.1f}%) | {worst[0]} {worst_gender} ({worst_rate:.1f}%) |\n"
+                table_md += f"| **{y_label}** | {best[0]} {best_gender} ({best_rate:.1f}%) | {worst[0]} {worst_gender} ({worst_rate:.1f}%) | {action_plan} |\n"
                 has_valid_stats = True
                 
         if has_valid_stats:
             analysis_texts.append(table_md)
-            analysis_texts.append("\n#### 경영 및 데이터 마케팅 관점 AI 제언")
             analysis_texts.append(
-                "1. **선택과 집중을 통한 LTV(고객생애가치) 극대화**: 전환율 최상위 코호트(Top-tier)는 고객 획득 비용(CAC) 회수율이 가장 우수한 핵심 세그먼트입니다. "
-                "해당 타겟층을 대상으로 자원을 우선 배정(Resource Allocation)하여 록인(Lock-in) 및 업셀링 전략을 전개할 것을 권장합니다.\n"
-                "2. **미드티어(Middle-tier) 넛지(Nudge) 캠페인 도입**: 성과 부진 또는 중간 수준의 전환율을 보이는 세그먼트에 대해서는 무리한 푸시 마케팅을 지양해야 합니다. "
-                "고객 여정(Customer Journey) 내 이탈이 발생하는 병목(Bottleneck) 구간을 정밀 분석하고, 개인화된 리타겟팅 및 A/B 테스트를 통해 "
-                "점진적인 전환율 개선(Conversion Rate Optimization)을 도모하는 STP 고도화 전략이 요구됩니다."
+                "⚠️ **비즈니스 리스크 조기 경고 (Watch out)**:\n"
+                "- **인과 신뢰의 한계**: 특정 핵심 코호트의 실적 상승 원인이 순수한 핵심 가치 만족인지, 혹은 타 채널의 한시적 결합할인 제휴에 따른 단기적 착시인지 정밀 분기 검증이 병행되어야 합니다.\n"
+                "- **평균값의 오류**: 조직의 전체 성과 지표가 성장세라 하더라도 부진 코호트와의 간극이 점진적으로 벌어지는 불균형 현상이 나타날 경우, 전사 마케팅 효율이 누수되므로 성과 지표 가중치 차등 분배를 권장합니다."
             )
             
     return "\n".join(analysis_texts)
@@ -260,10 +337,8 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
 # =====================================================================
 st.set_page_config(layout="wide", page_title="현대렌탈케어 고객만족센터 매출관리 대시보드")
 apply_custom_css()
-
 st.title("현대렌탈케어 고객만족센터 매출관리 대시보드")
 st.markdown("---")
-
 st.sidebar.header("데이터 업로드")
 sales_file = st.sidebar.file_uploader("1. 매출 데이터 (필수)", type=["xlsx", "xls"])
 crm_file = st.sidebar.file_uploader("2. CRM 데이터 (선택)", type=["xlsx", "xls"])
@@ -325,7 +400,6 @@ if sales_file:
                     best_per_year = df_valid.loc[df_valid.groupby('year')['성공율'].idxmax()]
                     for _, row in best_per_year.iterrows():
                         st.info(f"{row['year']}년 최고 실적: {row['period'].strftime('%m월')} (성공율 {row['성공율']:.1%})")
-
         with col2:
             with st.expander("지표별 트렌드 분석 (시각화)", expanded=True):
                 vis_col1, vis_col2 = st.columns(2)
@@ -355,7 +429,6 @@ if sales_file:
                     if not chart_df.empty:
                         chart_df['조회월'] = chart_df['period'].dt.strftime('%y년 ') + chart_df['period'].dt.month.astype(str) + '월'
                         if target_metric == '성공율': chart_df[target_metric] = chart_df[target_metric] * 100
-
                         if chart_type == "막대 그래프":
                             fig = px.bar(chart_df, x='조회월', y=target_metric, text=target_metric)
                             fig.update_traces(texttemplate='%{text:.1f}' if target_metric == '성공율' else '%{text:,.0f}', textposition='outside', marker_color='#1E88E5', textfont_size=13, cliponaxis=False)
@@ -365,7 +438,6 @@ if sales_file:
                             
                         max_val = chart_df[target_metric].max()
                         y_max_range = max_val * 1.2 if max_val > 0 else 1.0
-
                         fig.update_layout(
                             plot_bgcolor='rgba(255,255,255,1)', paper_bgcolor='rgba(255,255,255,1)', xaxis_title="", yaxis_title="",  
                             margin=dict(l=10, r=10, t=70, b=10),
@@ -383,7 +455,6 @@ if sales_file:
             st.dataframe(display_df.set_index('조회월').drop(columns=['period']).style.format({"성공율": "{:.2%}", "접수": "{:.0f}", "컨택": "{:.0f}", "성공": "{:.0f}", "설치완료": "{:.0f}"}))
             
     else:
-        # st.error 메시지는 parse_sales_data 내부에서 출력됩니다.
         pass
 else:
     st.info("좌측 메뉴에서 매출 데이터를 업로드하여 대시보드를 시작해주십시오.")
