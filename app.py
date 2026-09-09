@@ -371,10 +371,10 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
 # =====================================================================
 # [5단계] 대시보드 UI 레이아웃 구성
 # =====================================================================
-st.set_page_config(layout="wide", page_title="현대렌탈케어 경영관리 대시보드")
+st.set_page_config(layout="wide", page_title="현대렌탈케어 고객만족센터 실적 대시보드")
 apply_custom_css()
 
-st.title("현대렌탈케어 경영관리 대시보드")
+st.title("현대렌탈케어 고객만족센터 실적 대시보드")
 st.markdown("---")
 
 st.sidebar.header("데이터 업로드")
