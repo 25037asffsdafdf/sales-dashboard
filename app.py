@@ -189,12 +189,12 @@ def parse_crm_data(uploaded_file):
 def generate_ai_analysis(df, selected_period, crm_df=None):
     current_data = df[df['period'] == selected_period]
     if current_data.empty or current_data.iloc[0]['접수'] == 0:
-        return "선택하신 월의 실적 데이터가 충분하지 않아 분석 리포트를 생성할 수 없습니다."
+        return "⚠️ **선택하신 월의 실적 데이터가 존재하지 않거나 충분하지 않습니다.**"
         
     latest = current_data.iloc[0]
     
     # ----------------------------------------------------
-    # [추론 엔진 1단계] 전월 대비 실적 추세 자동 스캔 및 비즈니스 국면 진단
+    # [1단계] 실적 변동율 산출
     # ----------------------------------------------------
     prev_month_dt = latest['period'] - pd.DateOffset(months=1)
     prev_data_df = df[df['period'] == prev_month_dt]
@@ -209,14 +209,13 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         rec_change_pct = (rec_val - prev['접수']) / prev['접수']
         rate_diff_p = (success_rate - prev['성공율']) * 100
     
-    # 접수량 상태 자동 판정 (다차원 시나리오 분기)
+    # 국면 진단 기준 세분화
     if rec_change_pct >= 0.15: rec_state = "폭증"
     elif rec_change_pct >= 0.02: rec_state = "성장"
     elif -0.05 <= rec_change_pct < 0.02: rec_state = "정체"
     elif -0.15 <= rec_change_pct < -0.05: rec_state = "감소"
     else: rec_state = "급락"
         
-    # 성공율 효율 상태 자동 판정
     if rate_diff_p >= 3.0: rate_state = "급증"
     elif rate_diff_p >= 0.5: rate_state = "개선"
     elif -0.5 <= rate_diff_p < 0.5: rate_state = "유지"
@@ -224,75 +223,69 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     else: rate_state = "급락"
 
     # ----------------------------------------------------
-    # [추론 엔진 2단계] 10대 마케팅 이론 기반의 지능형 의사결정 매핑
+    # [2단계] 학술 매핑 및 단도직입 처방 매트릭스
     # ----------------------------------------------------
-    selected_theories = []
-    strategic_action = ""
-    
     if rec_state in ["폭증", "성장"] and rate_state in ["급증", "개선"]:
-        selected_theories = ["선택과 집중 전략 (Pareto Principle)", "고객 생애 가치 극대화 이론 (LTV/CAC Framework)"]
-        strategic_action = (
-            f"현재 신규 유입({rec_state})과 품질 효율({rate_state})이 이상적으로 동반 폭발하는 비즈니스 골든 크로스(Golden Cross) 구간입니다. "
-            f"이 국면에서는 신규 고객 획득 비용(CAC)을 보다 공격적으로 상향 조정하더라도, 장기적인 가입 고객 생애 가치(LTV) 회수율이 압도적일 확률이 높습니다. "
-            f"고객 유입 채널의 타겟팅 범위를 확대하는 동시, 우수 코호트에 마케팅 예산을 우선 재배정(Resource Allocation)하는 적극적 성장을 권장합니다."
-        )
+        theory = "LTV/CAC 극대화 모델"
+        key_issue = f"신규 유입({rec_state})과 효율({rate_state})이 동시에 올라가는 최고의 성장 사이클입니다."
+        one_line_action = "🚨 **우수 채널에 즉각 추가 광고 예산을 배정하여 점유율을 독식하십시오.**"
+        detail_action = "- 획득 가치(LTV)가 획득 비용(CAC)보다 압도적으로 높은 시기이므로 소극적 예산 통제를 지양할 것.\n- 성과가 가장 잘 나오는 고소득층 타겟 대상 크로스셀링 캠페인 동시 기획."
+    
     elif rec_state in ["폭증", "성장"] and rate_state in ["하락", "급락"]:
-        selected_theories = ["전환 퍼널 최적화 이론 (Conversion Funnel Bottleneck)", "보상적 의사결정 모델 (Compensatory Decision Theory)"]
-        strategic_action = (
-            f"마케팅을 통한 모객 볼륨은 {rec_state} 중이나, 실제 최종 상담 성공율은 {rate_state}하는 심각한 병목(Bottleneck) 구간에 진입했습니다. "
-            f"이는 인입된 고객의 가입 의사에 비해 상담 프로세스나 계약 체결 조건 설계상 심각한 마찰(Friction)이 존재함을 뜻합니다. "
-            f"즉시 무리한 광고 확장을 중단하고, 접수에서 컨택 및 성공으로 넘어가는 고객 여정(Customer Journey)의 중간 손실률을 분석하는 퍼널 고도화 작업을 단행해야 합니다."
-        )
+        theory = "전환 퍼널(Funnel) 보틀넥 최적화"
+        key_issue = f"광고 유입({rec_state})은 잘 되나, 내부 전환 효율({rate_state})이 무너져 유실이 발생하고 있습니다."
+        one_line_action = "🚨 **신규 마케팅을 일시 중단하고, 접수→상담 퍼널의 병목 구간을 수리하십시오.**"
+        detail_action = "- 유입된 가입 기대 수준에 비해 상담 스크립트나 조건 혜택 설계에 괴리가 있는지 점검 필요.\n- 콜 인센티브 구조 및 가입 신청 페이지의 UI 이탈 마찰력을 줄이는 작업 선행."
+    
     elif rec_state in ["감소", "급락"] and rate_state in ["급증", "개선"]:
-        selected_theories = ["관계 마케팅 및 차별적 고착화 (Relationship & Lock-in Strategy)", "가치 인식 기반 가격 이론 (Value Perception Theory)"]
-        strategic_action = (
-            f"유입되는 모수 규모 자체는 {rec_state}했으나 양질의 타겟 고객을 선별 집중함으로써 세일즈 효율({rate_state})을 방어해 내는 정예화(Filtering) 상태입니다. "
-            f"비용 대비 마케팅 효율이 안정적인 흐름이므로, 억지로 수치를 늘리려 비효율 채널을 재개하기보단 "
-            f"성공 가능성이 입증된 핵심 타겟 프로필(Look-alike Profile)을 정밀 역추적하여 유사 고객층에 예산을 유도하는 록인(Lock-in) 전략이 훨씬 유리합니다."
-        )
+        theory = "파레토 관계 마케팅 (80/20 법칙)"
+        key_issue = f"총 유입량({rec_state})은 축소되었으나, 선별된 정예 고객의 전환율({rate_state})은 상승했습니다."
+        one_line_action = "🚨 **비효율 대중 광고를 끊고, 우수 성공 고객의 '유사 프로필 타겟팅'으로 전환하십시오.**"
+        detail_action = "- 불특정 다수 타겟팅보다 우수 성공 이력을 기반으로 한 유사 타겟(Look-alike) 광고 소스 집중 분배.\n- 렌탈 객단가가 높은 프리미엄 모델 패키지 중심으로 상품 믹스 전략 재조정."
+    
     elif rec_state in ["감소", "급락"] and rate_state in ["하락", "급락"]:
-        selected_theories = ["손실 회피성 이론 (Loss Aversion Theory)", "행동 경제학적 넛지 모델 (Nudge & Psychological Pricing)"]
-        strategic_action = (
-            f"유입량({rec_state})과 세일즈 효율({rate_state})이 동시 침체 구조에 빠진 심각한 수축 비즈니스 사이클입니다. "
-            f"고객들의 심리적 구매 거부감과 가입 장벽이 극대화된 상태이므로 일반적인 제안으로는 극복이 어렵습니다. "
-            f"장기 계약 위약금 면제 옵션이나 첫 달 무료 홈체험 프로모션 등 고객의 '손실 회피 심리'를 허무는 혁신적인 넛지(Nudge) 트리거를 조속히 심어야 합니다."
-        )
-    else: # 정체 및 유지 상태
-        selected_theories = ["고객 여정 지도 분석 (Customer Journey Mapping)", "STP 고도화 세분화 이론 (Micro-segmentation)"]
-        strategic_action = (
-            f"접수량과 전환 효율 모두 전월 대비 정체 국면을 유지하고 있어 성장 동력이 다소 무뎌진 교착 상태입니다. "
-            f"기존의 단편화된 타겟 분석 방식으로는 새로운 전환 포인트를 찾기 어렵습니다. "
-            f"고객 연령 및 성별의 인구통계 변수를 넘어 라이프스타일, 라이프사이클 요구 수준에 맞춘 마이크로 세분화(STP) 리포지셔닝 캠페인을 수립할 필요가 있습니다."
-        )
+        theory = "손실 회피(Loss Aversion) 및 넛지"
+        key_issue = f"유입량({rec_state})과 품질 효율({rate_state})이 동반 둔화되는 비즈니스 침체 국면입니다."
+        one_line_action = "🚨 **고객의 금전적 위약금 장벽과 해지 저항감을 없애는 파격 제안을 검토하십시오.**"
+        detail_action = "- '첫 달 무료 렌탈 케어' 또는 '중도 해약금 면제 보장 기간 설정' 등 행동경제학적 넛지 배치 필요.\n- 초기 설치비 면제 등 가입 장벽을 완전히 허물어 심리적 진입로를 재확보할 것."
+    
+    else: # 정체 및 유지
+        theory = "STP 마이크로 세분화 이론"
+        key_issue = "수치 변동이 극히 미미하고 고착화되어 비즈니스 활력이 고갈된 상태입니다."
+        one_line_action = "🚨 **기존 성별/연령 구분을 넘어서 '라이프스타일' 맞춤형 신규 세그먼트를 개척하십시오.**"
+        detail_action = "- 기존 상담 리스트의 유선 접촉 시간대, 주거 환경 분석 등을 통합한 마이크로 세분화 실행.\n- '1인 가구', '반려동물 가구' 등 렌탈 목적에 맞춘 세일즈 포지셔닝 타겟 재설정."
 
     # ----------------------------------------------------
-    # [추론 엔진 3단계] 최종 분석 리포트 구조화 및 마크다운 바인딩
+    # [3단계] UI 가독성 극대화 리포트 구성 (마크다운)
     # ----------------------------------------------------
     analysis_texts = []
-    analysis_texts.append(f"### 📊 {latest['period'].strftime('%Y년 %m월')} 지능형 성과 진단 리포트")
-    analysis_texts.append(f"**현재 비즈니스 국면**: 유입 `{rec_state}` / 효율 `{rate_state}` 상황")
+    analysis_texts.append(f"### 📊 {latest['period'].strftime('%Y년 %m월')} 비즈니스 진단 리포트")
     
-    if not prev_data_df.empty and prev_data_df.iloc[0]['접수'] > 0:
-        analysis_texts.append(
-            f"🔍 **핵심 지표 요약**: 당월 신규 접수량은 전월 대비 **{rec_change_pct:+.1%}** 변동하였으며, "
-            f"상담 성공율은 **{rate_diff_p:+.2f}%p** 추세를 기록하고 있습니다."
-        )
-    else:
-        analysis_texts.append("🔍 **핵심 지표 요약**: 비교 대상이 되는 직전월 데이터가 확인되지 않아 당월 단독 흐름을 기반으로 마케팅 모델을 판단합니다.")
-        
-    analysis_texts.append("\n---\n### 🔬 데이터 분석가의 마케팅 학술 프레임워크 제언")
-    analysis_texts.append(f"📌 **적용 권장 마케팅 이론**: `{'`, `'.join(selected_theories)}`")
-    analysis_texts.append(f"💡 **AI 경영 처방**:\n{strategic_action}")
+    # 1. 단도직입 핵심 Action
+    analysis_texts.append(f"### 💡 핵심 권장 Action\n{one_line_action}")
+    analysis_texts.append("\n---")
+
+    # 2. 일목요연 요약 매트릭스 테이블
+    table_summary = (
+        f"| 구분 | 분석 결과 및 진단 내용 |\n"
+        f"|---|---|\n"
+        f"| **📈 현재 모객 국면** | 유입 `[{rec_state}]` (전월비 {rec_change_pct:+.1%}) |\n"
+        f"| **🎯 세일즈 효율** | 성공율 `[{rate_state}]` (전월비 {rate_diff_p:+.1f}%p) |\n"
+        f"| **🔬 추천 학술 모델** | `{theory}` |\n"
+        f"| **⚠️ 핵심 발견 문제** | {key_issue} |"
+    )
+    analysis_texts.append(table_summary)
+    analysis_texts.append("\n---")
     
-    # [추론 엔진 4단계] CRM 데이터 존재 시 인구통계 기반 연계 처방 설계
+    # 3. 상세 처방전
+    analysis_texts.append(f"### 📋 세부 처방 가이드\n{detail_action}")
+    
+    # 4. CRM 연동 코호트가 있을 경우 간결하게 추가
     if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별', '연도']):
-        analysis_texts.append("\n---\n### 👥 코호트(Cohort) 다차원 고객 세그먼트 분석")
-        analysis_texts.append("CRM 고객 데이터베이스의 가입 이력을 학술적 세그먼트 구조로 교차 대조하여 도출한 **최우수 전환 코호트** 및 **취약 코호트 집중 해결 액션 플랜**입니다.")
+        analysis_texts.append("\n---\n### 👥 CRM 코호트 핵심 요약")
         
-        table_md = "| 분석 연도 | 최우수 전환 코호트 (Target) | 전환 마찰 코호트 (Friction) | 해결을 위한 경영 전략적 Action 플랜 |\n|---|---|---|---|\n"
-        
+        table_crm = "| 연도 | 최고 전환 세그먼트 | 최저 전환 세그먼트 | 해결을 위한 집중 Action 플랜 |\n|---|---|---|---|\n"
         years = sorted([y for y in crm_df['연도'].unique() if pd.notna(y)])
-        has_valid_stats = False
         
         for y in years:
             y_df = crm_df[crm_df['연도'] == y]
@@ -310,27 +303,21 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 best_gender = best if str(best).endswith('성') else f"{best}성"
                 worst_gender = worst if str(worst).endswith('성') else f"{worst}성"
                 
-                # 취약 타겟 특성별 맞춤형 해결 기법 매핑
+                # 심플 액션 매핑
                 if "20대" in worst[0]:
-                    action_plan = "**[디지털 넛지]** 모바일 친화적인 간편 계약 서명 프로세스 구현 및 UX 전환 병목 최소화."
+                    action_plan = "모바일 계약서 간소화 (Friction 최저화)"
                 elif "50대" in worst[0] or "60대" in worst[0]:
-                    action_plan = "**[휴리스틱 케어]** 유선 해피콜 전담 레이아웃 추가 구축 및 직관적인 렌탈 안내 팜플렛 지원."
+                    action_plan = "시니어 전담 케어 콜 및 종이 안내장 병행"
                 else:
-                    action_plan = "**[A/B 테스트]** 타겟 세그먼트에 맞춘 맞춤형 월 렌탈 요금제 및 특전 가치 제안(CVP) 전개."
+                    action_plan = "연령 맞춤형 요금 결합 혜택 제시"
                 
                 y_label = f"{int(y)}년" if isinstance(y, (int, float)) else str(y)
-                table_md += f"| **{y_label}** | {best[0]} {best_gender} ({best_rate:.1f}%) | {worst[0]} {worst_gender} ({worst_rate:.1f}%) | {action_plan} |\n"
-                has_valid_stats = True
+                table_crm += f"| **{y_label}** | {best[0]} {best_gender} ({best_rate:.1f}%) | {worst[0]} {worst_gender} ({worst_rate:.1f}%) | {action_plan} |\n"
                 
-        if has_valid_stats:
-            analysis_texts.append(table_md)
-            analysis_texts.append(
-                "⚠️ **비즈니스 리스크 조기 경고 (Watch out)**:\n"
-                "- **인과 신뢰의 한계**: 특정 핵심 코호트의 실적 상승 원인이 순수한 핵심 가치 만족인지, 혹은 타 채널의 한시적 결합할인 제휴에 따른 단기적 착시인지 정밀 분기 검증이 병행되어야 합니다.\n"
-                "- **평균값의 오류**: 조직의 전체 성과 지표가 성장세라 하더라도 부진 코호트와의 간극이 점진적으로 벌어지는 불균형 현상이 나타날 경우, 전사 마케팅 효율이 누수되므로 성과 지표 가중치 차등 분배를 권장합니다."
-            )
+        analysis_texts.append(table_crm)
             
     return "\n".join(analysis_texts)
+
 
 # =====================================================================
 # [4단계] 대시보드 UI 및 차트 구성
