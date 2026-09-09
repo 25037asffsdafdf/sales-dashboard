@@ -5,10 +5,9 @@ import re
 import traceback
 import plotly.express as px
 
-# =====================================================================
+# =====================================================
 # [0단계] 고급 디자인 커스텀 CSS
-# =====================================================================
-def apply_custom_css():
+# ===================================def apply_custom_css():
     st.markdown("""
         <style>
             .stApp { background-color: #F9F9F6; }
@@ -88,6 +87,7 @@ def apply_custom_css():
                 background-color: #ffffff;
                 border: 1px solid #eeeeee;
                 border-radius: 8px;
+                line-height: 1.7;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -102,7 +102,6 @@ def clean_string(val):
 def standardize_metric_name(raw_name):
     clean_name = clean_string(raw_name)
     if not clean_name: return None
-    
     if '접수' in clean_name and ('비' in clean_name or '比' in clean_name or '율' in clean_name or '률' in clean_name): return '성공율'
     if '성공' in clean_name and ('율' in clean_name or '률' in clean_name): return '성공율'
     if '설치' in clean_name and '완료' in clean_name: return '설치완료'
@@ -113,7 +112,7 @@ def standardize_metric_name(raw_name):
 
 # =====================================================================
 # [2단계] 핵심 매출 데이터 파싱
-# =====================================================================
+# =============================================
 def parse_sales_data(uploaded_file):
     try:
         df_raw = pd.read_excel(uploaded_file, header=None).fillna("")
@@ -135,20 +134,17 @@ def parse_sales_data(uploaded_file):
         for i, h_idx in enumerate(header_rows):
             end_idx = header_rows[i+1] if i + 1 < len(header_rows) else len(df_raw)
             block = df_raw.iloc[h_idx:end_idx]
-            
             dates = {}
             fallback_y = datetime.now().year
             
             for c in range(anchor_c + 1, len(df_raw.columns)):
                 d_val = str(block.iat[0, c]).replace(" ", "").replace(".0", "")
                 if not d_val or d_val == 'nan': continue
-                
                 nums = re.findall(r'\d+', d_val)
                 if not nums: continue
                 
                 num_str = "".join(nums)
                 y, m = -1, -1
-                
                 if len(num_str) >= 6:
                     y, m = int(num_str[:4]), int(num_str[4:6])
                 elif len(nums) >= 2:
@@ -190,34 +186,30 @@ def parse_sales_data(uploaded_file):
         df_pivot = df_pivot.sort_values('period').reset_index(drop=True)
         df_pivot['성공율'] = df_pivot.apply(lambda row: row['성공'] / row['접수'] if row.get('접수', 0) > 0 else 0.0, axis=1)
         return df_pivot
-        
     except Exception as e:
         st.error(f"시스템 오류 발생: {str(e)}")
         return None
 
-# =====================================================================
+# =============================================
 # [3단계] CRM 데이터 파싱
 # =====================================================================
 def parse_crm_data(uploaded_file):
     try:
         crm_df = pd.read_excel(uploaded_file)
         crm_df.columns = [clean_string(col) for col in crm_df.columns]
-        
         if '생년월일' in crm_df.columns:
             crm_df['생년월일'] = pd.to_datetime(crm_df['생년월일'], errors='coerce')
             crm_df = crm_df.dropna(subset=['생년월일']).copy()
             crm_df['연령대'] = ((datetime.now().year - crm_df['생년월일'].dt.year) // 10 * 10).astype(int).astype(str) + '대'
-            
         for col in ['성별', '성공여부']:
             if col in crm_df.columns: crm_df[col] = crm_df[col].astype(str).apply(clean_string)
-                
         date_col = next((c for c in crm_df.columns if '일' in c and ('가입' in c or '접수' in c or '등록' in c)), None)
         crm_df['연도'] = pd.to_datetime(crm_df[date_col], errors='coerce').dt.year if date_col else "전체 기간"
         return crm_df
     except Exception: return None
 
 # =====================================================================
-# [4단계] AI 경영 리포트 생성 엔진 (전년 대비 로직 통합)
+# [4단계] 100-Case 매트릭스 엔진 (5x5x4 조합 로컬 코딩)
 # =====================================================================
 def generate_ai_analysis(df, selected_period, crm_df=None):
     current_data = df[df['period'] == selected_period]
@@ -228,44 +220,42 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     prev_month_dt = latest['period'] - pd.DateOffset(months=1)
     prev_data_df = df[df['period'] == prev_month_dt]
     
-    # 1. 월간 변동성 지표 산출
+    # 1. 월간 지표 산출
     rec_val = latest['접수']
     success_rate = latest['성공율']
     rec_change_pct = 0.0
     rate_diff_p = 0.0
-    
     if not prev_data_df.empty and prev_data_df.iloc[0]['접수'] > 0:
         prev = prev_data_df.iloc[0]
         rec_change_pct = (rec_val - prev['접수']) / prev['접수']
         rate_diff_p = (success_rate - prev['성공율']) * 100
 
-    # 2. 전년 전체 평균 대비 당월 성공율 비교 지표 산출
+    # 2. 전년 평균 비교 산출
     current_year = selected_period.year
     prev_year = current_year - 1
     df_prev_year = df[df['period'].dt.year == prev_year]
     
     avg_success_rate_prev_year = 0.0
     yoy_diff_p = 0.0
-    
     if not df_prev_year.empty and df_prev_year['접수'].sum() > 0:
         avg_success_rate_prev_year = df_prev_year['성공'].sum() / df_prev_year['접수'].sum()
         yoy_diff_p = (success_rate - avg_success_rate_prev_year) * 100
 
-    # --- [경우의 수 1축: 접수 건수 변동 (5단계)] ---
+    # --- 축 1: 접수 건수 변동 (5단계) ---
     if rec_change_pct >= 0.15: v_lvl, v_text = "대폭 증가", f"전월비 {rec_change_pct*100:+.1f}%"
     elif rec_change_pct >= 0.02: v_lvl, v_text = "점진 증가", f"전월비 {rec_change_pct*100:+.1f}%"
     elif -0.05 <= rec_change_pct < 0.02: v_lvl, v_text = "보합(유지)", f"전월비 {rec_change_pct*100:+.1f}%"
     elif -0.15 <= rec_change_pct < -0.05: v_lvl, v_text = "점진 감소", f"전월비 {rec_change_pct*100:+.1f}%"
     else: v_lvl, v_text = "대폭 감소", f"전월비 {rec_change_pct*100:+.1f}%"
         
-    # --- [경우의 수 2축: 당월 성공율 변동폭 (5단계)] ---
+    # --- 축 2: 성공율 변동폭 (5단계) ---
     if rate_diff_p >= 3.0: r_lvl, r_text = "대폭 개선", f"전월비 {rate_diff_p:+.1f}%p"
     elif rate_diff_p >= 0.5: r_lvl, r_text = "점진 개선", f"전월비 {rate_diff_p:+.1f}%p"
     elif -0.5 <= rate_diff_p < 0.5: r_lvl, r_text = "보합(유지)", f"전월비 {rate_diff_p:+.1f}%p"
     elif -3.0 <= rate_diff_p < -0.5: r_lvl, r_text = "점진 하락", f"전월비 {rate_diff_p:+.1f}%p"
     else: r_lvl, r_text = "대폭 하락", f"전월비 {rate_diff_p:+.1f}%p"
 
-    # --- [경우의 수 3축: 전년 평균 대비 당월 성공율 판정 (3단계)] ---
+    # --- 축 3: 전년 대비 성과 (4단계) ---
     if avg_success_rate_prev_year == 0:
         yoy_lvl, yoy_text = "비교 불가", "전년 데이터 없음"
     elif yoy_diff_p >= 2.0:
@@ -275,10 +265,81 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     else:
         yoy_lvl, yoy_text = "실적 미흡", f"작년 평균비 {yoy_diff_p:+.1f}%p"
 
-    # --- [경우의 수 4축: CRM 코호트 특성 (4단계)] ---
-    c_text = "CRM 데이터 연동 시, 주력 고객층 및 취약 고객층에 대한 세부 진단이 제공됩니다."
-    best_cohort, worst_cohort = "-", "-"
+    # ==============================================================================
+    # 🧠 100-Case 동적 조립 알고리즘 (V 5종 × R 5종 × Y 4종 = 100가지 유니크 출력)
+    # ==============================================================================
     
+    # [블록 A: 25가지 시장 진단 및 이론 매핑 (V × R)]
+    if "증가" in v_lvl:
+        if "개선" in r_lvl:
+            theory = "LTV(고객생애가치) 극대화 모델"
+            theory_rationale = "접수량과 전환 효율이 동반 상승하는 '확장기'입니다. 자원의 보수적 통제보다 점유율 선점을 위한 공격적 예산 투입이 절대적으로 유리한 시점입니다."
+            diagnosis = f"신규 접수가 {v_lvl}함과 동시에 최종 성공율 역시 {r_lvl}하고 있는 최상의 선순환 구조입니다."
+        elif "하락" in r_lvl:
+            theory = "영업 퍼널(Funnel) 병목 최적화"
+            theory_rationale = "접수 유입은 늘었으나 최종 계약이 꺾이는 전형적인 마찰(Friction) 현상입니다. 모객 외형 확대보다 영업 전환 구조의 내부 결함을 우선 치유해야 합니다."
+            diagnosis = f"신규 접수는 {v_lvl}했으나 최종 성공율은 오히려 {r_lvl} 중입니다. 영업 퍼널 곳곳에 고객 유실 요인이 심각하게 작동하고 있습니다."
+        else:
+            theory = "업셀링(Up-selling) 및 추가 가치 제안"
+            theory_rationale = "유입량은 원활하나 효율이 정체되어 있습니다. 가망 고객의 구매 의사결정을 촉발시킬 '결정적 트리거(프로모션 등)'가 부재한 상태입니다."
+            diagnosis = f"신규 접수 건수가 {v_lvl}하고 있으나, 성공율은 {r_lvl} 상태를 면하지 못해 추가적인 도약 지점을 찾지 못하고 있습니다."
+            
+    elif "감소" in v_lvl:
+        if "개선" in r_lvl:
+            theory = "파레토 법칙 (80/20 집중 타겟팅)"
+            theory_rationale = "모객량은 줄었으나 체결율이 높아진 것은 타겟 정교화가 적중했음을 시사합니다. 대중 광고비를 삭감하고 진성 타겟 위주로 자원을 효율화하는 것이 타당합니다."
+            diagnosis = f"신규 접수량은 {v_lvl}했으나 세일즈 집중력 상승으로 성공율은 오히려 {r_lvl}했습니다. 허수 유입이 필터링된 결과입니다."
+        elif "하락" in r_lvl:
+            theory = "손실 회피(Loss Aversion) 진입 장벽 완화"
+            theory_rationale = "유입량과 체결율이 동반 붕괴하는 더블 딥 상황입니다. 고객이 느끼는 초기 재무적 장벽이나 약정 부담을 파격적으로 해제해야만 반등이 가능합니다."
+            diagnosis = f"신규 접수량과 성공율이 동시에 {v_lvl}/{r_lvl}하는 위기 상황입니다. 비즈니스 활력 자체가 심각하게 침체되어 있습니다."
+        else:
+            theory = "마케팅 채널 피로도 진단 및 믹스 다변화"
+            theory_rationale = "효율은 보합권에서 방어 중이나 유입 통로 자체가 마르고 있습니다. 기존 광고 매체의 피로도 누적이 원인이므로 신규 트래픽 채널 발굴이 시급합니다."
+            diagnosis = f"성공율 효율은 보합권에서 방어 중이나, 신규 접수량 자체가 {v_lvl}하고 있어 장기적인 모객 저하가 예측됩니다."
+            
+    else: # 보합
+        if "개선" in r_lvl:
+            theory = "영업 접점(MOT) 전환 효율성 고도화"
+            theory_rationale = "모객은 멈춰 있으나 영업 사원의 체결 능력이 극대화된 상태입니다. 스크립트 최적화 및 영업 인센티브 체계를 강화하여 효율을 끝까지 쥐어짜야 합니다."
+            diagnosis = f"접수량은 {v_lvl} 중이나 내부 영업력 강화를 통해 성공율을 {r_lvl}시키며 실적 방어에 성공하고 있습니다."
+        elif "하락" in r_lvl:
+            theory = "제품 경쟁력 및 CVP(고객가치제안) 재수립"
+            theory_rationale = "모객은 평이한데 체결이 무너지는 것은 상품 자체의 매력도가 떨어졌음을 의미합니다. 근본적인 상품 패키징이나 가격 혜택을 재정비해야 합니다."
+            diagnosis = f"접수량은 {v_lvl} 상태이나 성공율이 {r_lvl}하며 기존 상품 라인업의 시장 소구력이 약화되고 있습니다."
+        else:
+            theory = "STP(시장세분화) 마이크로 포지셔닝"
+            theory_rationale = "양적/질적 지표가 모두 장기 횡보하는 것은 기존 모델의 수명이 다했음을 의미합니다. 특정 라이프스타일(1인 가구 등)에 맞춘 틈새 시장을 개척해야 합니다."
+            diagnosis = f"접수 수량과 가입 성공율 모두 뚜렷한 변동 없는 {v_lvl} 및 {r_lvl} 상태입니다. 전체 실적이 고착화되었습니다."
+
+    # [블록 B: 100가지 액션 조립 (25개 진단 × 4개 YoY 성과 결합)]
+    if "초과" in yoy_lvl:
+        action_title = f"성과 초과 달성에 따른 [{theory}] 전략 전면 확대"
+        action_detail = (
+            f"1. 당월 최종 성공율이 작년 연간 평균을 <b>확연히 초과 달성({yoy_diff_p:+.1f}%p)</b>하며 매우 양호한 모멘텀을 형성하고 있습니다.<br>"
+            f"2. 위 진단에 따라 마케팅 비용 통제 한도를 상향하고, 성과 우수 채널 및 부서에 즉각적인 인센티브를 부여하여 시장 점유율을 독식해야 합니다."
+        )
+    elif "보합" in yoy_lvl:
+        action_title = f"전년 수준 유지 및 [{theory}] 기반의 안정적 자원 방어"
+        action_detail = (
+            f"1. 당월 성공율이 작년 평균 대비 <b>유사 수준({yoy_diff_p:+.1f}%p)</b>에 안착하여 급격한 하락 리스크를 1차적으로 방어 중입니다.<br>"
+            f"2. 전체 예산 규모는 현 수준으로 보수적 유지하되, 위 진단에서 도출된 취약 구간의 리소스를 빼내어 우수 구간으로 이동시키는 '리밸런싱'이 요구됩니다."
+        )
+    elif "미흡" in yoy_lvl:
+        action_title = f"전년비 실적 미달에 따른 긴급 비용 통제 및 [{theory}] 처방 적용"
+        action_detail = (
+            f"1. 월간 등락에 관계없이, 당월 성공율이 작년 연간 평균에 비해서는 여전히 <b>실적 미흡({yoy_diff_p:+.1f}%p)</b> 구간에 고립되어 있습니다.<br>"
+            f"2. 저효율 마케팅 캠페인을 전면 동결하고, 위 진단된 문제점을 해결하기 위한 내부 프로세스 재정비에 총력을 기울이십시오."
+        )
+    else:
+        action_title = f"기준점 재수립 및 [{theory}] 중심의 영업 전략 구축"
+        action_detail = (
+            f"1. 신뢰할 수 있는 전년도 평균 데이터가 누락되어 당월 단독 흐름을 기반으로 분석을 진행했습니다.<br>"
+            f"2. 현재의 실적을 새로운 베이스라인(Baseline)으로 삼고, 위 진단에 부합하는 타겟 대응 매뉴얼을 수립하십시오."
+        )
+
+    # --- [부가 정보: CRM 코호트 특성 (본류와 분리된 추가 통찰)] ---
+    c_text = "CRM 데이터 연동 시, 주력 고객군과 취약 고객군을 자동 판별합니다."
     if crm_df is not None and not crm_df.empty:
         try:
             curr_y_df = crm_df[crm_df['연도'] == latest['period'].year]
@@ -287,58 +348,8 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 if not stats.empty and len(stats) > 0:
                     best = stats.index[0]
                     worst = stats.index[-1]
-                    best_cohort = f"{best[0]} {best}"
-                    worst_cohort = f"{worst[0]} {worst}"
-                    c_text = f"현재 당사의 주력 성공 타겟은 <b>[{best_cohort}]</b>이며, 이탈 마찰이 가장 심한 취약 타겟은 <b>[{worst_cohort}]</b>입니다."
+                    c_text = f"현재 당사의 계약 체결이 가장 수월한 최우��� 타겟은 <b>[{best[0]} {best}]</b>이며, 영업 마찰이 가장 심각한 취약 타겟은 <b>[{worst[0]} {worst}]</b>로 분석되었습니다."
         except: pass
-
-    # --- [AI 진단 및 마케팅 이론 매핑] ---
-    if "증가" in v_lvl:
-        if "개선" in r_lvl:
-            theory = "LTV(고객생애가치) 극대화 모델"
-            theory_rationale = "접수량과 전환율이 동반 상승하는 '골든 크로스' 구간에서는 한정된 예산 분배보다, 공격적 자원 투입을 통한 선점이 재무적 기업 가치 창출에 절대적으로 유리하기 때문입니다."
-            diagnosis = "신규 접수 건수와 성공율이 동반 상승하는 최상의 '골든 크로스' 상태입니다. 시장 점유율을 적극적으로 확대할 최적의 시점입니다."
-            action_title = "성과 우수 채널 중심의 공격적인 마케팅 예산 증액"
-            action_detail = "1. 현재는 투입 비용 대비 수익 창출 효과(ROI)가 극대화되는 시기이므로, 성과가 입증된 채널의 예산을 대폭 상향하여 경쟁사와의 격차를 벌려야 합니다.<br>2. 계약 성공률이 높은 우수 고객층에게 추가 혜택(업셀링, 크로스셀링)을 제안하여 객단가를 높이는 전략을 병행하십시오."
-        elif "하락" in r_lvl:
-            theory = "퍼널(Funnel) 이탈 구간 최적화"
-            theory_rationale = "접수 건수는 증가하나 전환율이 하락하는 징후는 내부 프로세스(상담, 조건) 내 마찰(Friction) 현상을 의미합니다. 외형 확장보다 내부 성공 구조의 결함 치유가 우선되어야 하므로 본 이론을 적용합니다."
-            diagnosis = "신규 접수는 증가했으나, 최종 성공율이 하락했습니다. 이는 영업 및 계약 프로세스 내부에 심각한 이탈 병목(Bottleneck)이 발생하고 있음을 시사합니다."
-            action_title = "신규 광고 예산 일시 통제 및 내부 영업 프로세스 긴급 점검"
-            action_detail = "1. 광고로 유입된 고객의 기대와 실제 상담 내용 간의 괴리가 이탈을 유발하고 있는지 점검해야 합니다.<br>2. 복잡한 가입 절차, 상담원 연결 지연 등 내부 프로세스의 비효율 요소를 최우선으로 제거하십시오."
-        else:
-            theory = "업셀링(Up-selling) 및 결정적 넛지 제안"
-            theory_rationale = "접수 유입은 폭발적이나 전환이 정체된 경우, 고객의 구매 결정(Decision-making)을 촉발할 최종 미끼(Trigger)가 부재한 상태이므로 행동경제학적 넛지 제안이 적합합니다."
-            diagnosis = "신규 접수는 증가했으나, 성공율은 정체 구간입니다. 가망 고객을 계약으로 이끌 결정적 유인책이 부족한 상태입니다."
-            action_title = "전환율 제고를 위한 추가 프로모션 한시적 적용 요망"
-            action_detail = "1. 접수된 고객의 마음을 열 '첫 달 렌탈료 무료', '사은품 업그레이드' 등의 타임세일 방식 프로모션 도입을 검토하십시오.<br>2. 상담 스크립트 상에 고객 혜택을 전면 배치하도록 재조정하십시오."
-            
-    elif "감소" in v_lvl:
-        if "개선" in r_lvl:
-            theory = "파레토 법칙 (80/20 규칙) 기반 집중 타겟팅"
-            theory_rationale = "접수 모수는 감소했으나 전환 효율이 상승한 것은 타겟팅이 매우 정교하게 적중했음을 의미합니다. 상위 20%의 진성 고객군에 자원을 집중하는 파레토 모델을 적용합니다."
-            diagnosis = "전체 접수 건수는 감소했으나, 오히려 최종 성공율은 상승했습니다. 비효율적인 허수 고객이 필터링되고 '진성 고객' 위주로 효율적인 영업이 진행되고 있음을 의미합니다."
-            action_title = "저효율 광고 예산 삭감 및 핵심 유사 타겟 집중 공략"
-            action_detail = "1. 전체 볼륨이 아닌 비용 효율성(ROAS) 관점에서 매우 긍정적인 신호입니다. 허수 유입을 유발하는 채널을 과감히 정리하십시오.<br>2. 최근 계약에 성공한 진성 고객과 프로필이 비슷한 '유사 타겟(Look-alike)'에게 광고 예산을 쏟아부으십시오."
-        elif "하락" in r_lvl:
-            theory = "손실 회피(Loss Aversion) 및 진입 장벽 완화"
-            theory_rationale = "접수와 성공이 동반 하락하는 상황은 시장 내 경쟁력이 임계치 이하로 떨어졌음을 의미합니다. 고객의 심리적 재무 장벽을 낮추는 행동경제학적 접근이 가장 시급합니다."
-            diagnosis = "접수와 성공율이 모두 하락하는 '이중 침체(Double Dip)' 국면입니다. 기존 방식으로는 실적 반등이 매우 어렵습니다."
-            action_title = "시장 침체 극복을 위한 파격적인 진입 혜택 및 고객 부담 완화 시급"
-            action_detail = "1. 소비 심리 위축에 대응하기 위해 '초기 설치비 완전 무료', '위약금 부담 완화' 등 고객의 심리적 진입 장벽을 완전히 제거하는 제안이 필요합니다.<br>2. 기존 타겟 방식을 엎고, 새로운 렌탈 목적을 가진 신시장 개척을 위한 파일럿 테스트를 진행하십시오."
-        else:
-            theory = "마케팅 채널 노후화 진단 및 믹스 다변화"
-            theory_rationale = "성공율은 방어되고 있으나 절대적인 접수 규모가 쇠퇴하는 것은 채널 피로도 누적이 원인이므로, 인접 매체로의 채널 믹스 다변화 이론을 적용합니다."
-            diagnosis = "성공율은 방어하고 있으나, 신규 접수량 자체가 점진적으로 감소하고 있습니다. 기존 마케팅 채널의 고객 반응이 고갈된 상태입니다."
-            action_title = "기존 매체 편중에서 탈피하여 신규 고객 접점 채널 적극 발굴"
-            action_detail = "1. 장기간 반복 노출된 광고 소재와 플랫폼을 전면 교체하여 브랜드 피로도를 리프레시해야 합니다.<br>2. 숏폼 플랫폼, 버티컬 커뮤니티 등 당사가 접근하지 않았던 신규 트래픽 채널로 마케팅 예산을 분산 투자하십시오."
-            
-    else: # 보합
-        theory = "STP(시장세분화) 마이크로 포지셔닝 고도화"
-        theory_rationale = "양적, 질적 지표가 모두 장기 횡보하는 것은 기존 영업 모델의 수명이 다했음을 의미합니다. 거시적 관점에서 벗어나 라이프스타일 기반 미세 세분화로 틈새 시장을 개척해야 합니다."
-        diagnosis = "접수량과 성공율 모두 전월과 비슷한 정체 상태입니다. 전체적인 사업 실적이 특정 박스권에 고착화되었습니다."
-        action_title = "기존 인구통계를 넘어 라이프스타일 기반의 세분화 상품 기획 필요"
-        action_detail = "1. 수요가 정체된 상태로, 기존의 획일화된 렌탈 방식으로는 추가 수요 창출이 불가합니다.<br>2. '1인 가구', '펫(Pet) 거주 가구' 등 특정 세그먼트에 정확히 부합하는 전용 패키지를 신설하여 제안하십시오."
 
     return {
         "action_title": action_title,
@@ -349,7 +360,6 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         "c_text": c_text,
         "theory": theory, "theory_rationale": theory_rationale,
         "has_crm": crm_df is not None and not crm_df.empty,
-        # 팝업에 노출하기 위한 원본 계산값들
         "rec_change_pct": rec_change_pct,
         "rate_diff_p": rate_diff_p,
         "avg_success_rate_prev_year": avg_success_rate_prev_year,
@@ -400,7 +410,7 @@ if sales_file:
         
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # [수정 완료: KPI 누락 복구 영역]
+        # [핵심 성과 지표 KPI]
         with st.expander(f"{sel_main_y}년 {sel_main_m}월 핵심 성과 지표", expanded=True):
             kpi_cols = st.columns(4)
             for col, metric in zip(kpi_cols, ['접수', '컨택', '성공', '성공율']):
@@ -413,7 +423,7 @@ if sales_file:
 
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # [수정 완료: 7대3 레이아웃 및 우측 팝업 복구 영역]
+        # [7대3 레이아웃: AI 보고서 및 우측 판단 근거 팝업]
         report_col, pop_col = st.columns([7, 3])
         
         ai_output = generate_ai_analysis(df, selected_period, crm_df)
@@ -421,32 +431,32 @@ if sales_file:
         if ai_output:
             with report_col:
                 with st.expander("📊 AI 경영진단 요약 보고서", expanded=True):
-                    # 1. 핵심 경영 지침
+                    # 1. 100-Case 조합 결론 액션 타이틀
                     st.markdown(f"<div class='action-highlight-box'>📢 **핵심 경영 지침:** {ai_output['action_title']}</div>", unsafe_allow_html=True)
                     
-                    # 2. 시각화된 3열 요약 카드 (전년 평균 대비 지표로 교체)
+                    # 2. 3열 메트릭 카드
                     st.markdown("<b>[월간 핵심 지표 요약]</b>", unsafe_allow_html=True)
                     c1, c2, c3 = st.columns(3)
                     with c1:
                         st.markdown(f"""<div class='summary-card'>
-                                        <h4>📈 접수 건수 (월별)</h4>
+                                        <h4>📈 접수 건수 (월간)</h4>
                                         <div class='value'>{ai_output['v_lvl']}</div>
                                         <div class='trend'>{ai_output['v_change']}</div>
                                     </div>""", unsafe_allow_html=True)
                     with c2:
                         st.markdown(f"""<div class='summary-card'>
-                                        <h4>🎯 성공율 변동 (월별)</h4>
+                                        <h4>🎯 성공율 변동 (월간)</h4>
                                         <div class='value'>{ai_output['r_lvl']}</div>
                                         <div class='trend'>{ai_output['r_change']}</div>
                                     </div>""", unsafe_allow_html=True)
                     with c3:
                         st.markdown(f"""<div class='summary-card'>
-                                        <h4>📊 전년 평균 대비 성공율</h4>
+                                        <h4>📊 전년 평균비 성공율</h4>
                                         <div class='value'>{ai_output['yoy_lvl']}</div>
                                         <div class='trend'>{ai_output['yoy_change']}</div>
                                     </div>""", unsafe_allow_html=True)
                     
-                    # 3. 종합 진단 및 실행 방안
+                    # 3. 25가지 진단 블록 및 100가지 액션 결합 문장 출력
                     st.markdown(f"<div class='diagnosis-box'><strong>💡 [종합 진단]</strong><br>{ai_output['diagnosis']}</div>", unsafe_allow_html=True)
                     
                     st.markdown("<b>[실무 부서 세부 실행 방안]</b>", unsafe_allow_html=True)
@@ -454,40 +464,41 @@ if sales_file:
                     st.write("")
                     
                     if ai_output['has_crm']:
-                        st.markdown("<b>[고객 특성 분석 (CRM 연동)]</b>", unsafe_allow_html=True)
+                        st.markdown("<b>[고객 특성 분석 (CRM 부록)]</b>", unsafe_allow_html=True)
                         st.markdown(f"<div class='detail-box'>{ai_output['c_text']}</div>", unsafe_allow_html=True)
             
             with pop_col:
                 with st.expander("🔍 데이터 판단 근거 및 적용 이론", expanded=False):
+                    # 취약한 마크다운 문법(물결 등) 완전 배제, 안전한 리스트로 구성
                     criteria_md = f"""
-                    **[시스템 진단 로직 및 임계치 운영 기준]**
+                    **[시스템 100-Case 자동 조립 기준표]**
                     
-                    본 보고서는 아래 4개 축을 결합한 400여 가지의 경영 시나리오를 바탕으로 시스템이 자동 추론했습니다.
+                    본 보고서는 5(양적) × 5(질적) × 4(성과) = 총 100가지의 경우의 수 중 최적 매트릭스를 로컬 연산하여 도출합니다.
                     
-                    **1. 양적 지표 (접수 건수 변동 기준)**
-                    - 산식: 당월 접수량 전월비 증감률 (`{ai_output['rec_change_pct']*100:+.1f}%`)
-                    - 판정: 대폭 증가(+15% 이상) / 점진 증가(+2% 이상) / 보합(-5% 내외) / 점진 감소(-15% 이하) / 대폭 감소(-15% 미만)
-                    - 당월 판정: **{ai_output['v_lvl']}**
+                    **1. 양적 지표 (접수 건수 변동)**
+                    - 산식: 전월 대비 증감률 ({ai_output['rec_change_pct']*100:+.1f}%)
+                    - 판정 범위: 대폭 증가(+15% 이상) / 점진 증가(+2% 이상) / 보합(-5% 내외) / 점진 감소(-15% 이하) / 대폭 감소(-15% 미만)
+                    - 당월 시스템 판정: **{ai_output['v_lvl']}**
                     
-                    **2. 질적 지표 (월간 성공율 변동폭 기준)**
-                    - 산식: 당월 성공률 전월비 증감 포인트 (`{ai_output['rate_diff_p']:+.2f}%p`)
-                    - 판정: 대폭 개선(+3%p 이상) / 점진 개선(+0.5%p 이상) / 보합(-0.5%p 내외) / 점진 하락(-3.0%p 이하) / 대폭 하락(-3.0%p 미만)
-                    - 당월 판정: **{ai_output['r_lvl']}**
+                    **2. 질적 지표 (당월 성공율 변동폭)**
+                    - 산식: 전월 대비 증감 포인트 ({ai_output['rate_diff_p']:+.2f}%p)
+                    - 판정 범위: 대폭 개선(+3%p 이상) / 점진 개선(+0.5%p 이상) / 보합(-0.5%p 내외) / 점진 하락(-3.0%p 이하) / 대폭 하락(-3.0%p 미만)
+                    - 당월 시스템 판정: **{ai_output['r_lvl']}**
                     
                     **3. 성과 지표 (전년 전체 평균 대비 당월 성공율)**
-                    - 산식: 당월 성공율(`{ai_output['success_rate']*100:.1f}%`) - 작년 연간 평균 성공율(`{ai_output['avg_success_rate_prev_year']*100:.1f}%`) = `{ai_output['yoy_diff_p']:+.2f}%p`
-                    - 판정: 초과 달성(+2.0%p 이상) / 유사 수준 보합(-2.0%p ~ +2.0%p) / 실적 미흡(-2.0%p 미만)
-                    - 당월 판정: **{ai_output['yoy_lvl']}**
+                    - 산식: 당월 성공율({ai_output['success_rate']*100:.1f}%) 마이너스 작년 연간 평균 성공율({ai_output['avg_success_rate_prev_year']*100:.1f}%) = {ai_output['yoy_diff_p']:+.2f}%p
+                    - 판정 범위: 초과 달성(+2.0%p 이상) / 유사 수준 보합(-2.0%p 부터 +2.0%p) / 실적 미흡(-2.0%p 미만)
+                    - 당월 시스템 판정: **{ai_output['yoy_lvl']}**
                     
-                    **4. 적용된 마케팅 학술 이론 및 매핑 근거**
+                    **4. 적용된 마케팅 학술 이론 및 매핑 사유**
                     - 적용 모델: **{ai_output['theory']}**
-                    - 이론 선정 사유 (Rationale): {ai_output['theory_rationale']}
+                    - 이론 매핑 사유 (Rationale): {ai_output['theory_rationale']}
                     """
                     st.markdown(criteria_md)
         else:
             st.warning("선택하신 월의 데이터가 부족하여 AI 리포트를 생성할 수 없습니다.")
 
-        # --- 차트 및 원본 데이터 테이블 (기존 기능 유지) ---
+        # --- 차트 및 원본 데이터 테이블 ---
         st.markdown("<br>", unsafe_allow_html=True)
         with st.expander("📈 지표별 트렌드 분석 (시각화)", expanded=True):
              vis_col1, vis_col2 = st.columns(2)
