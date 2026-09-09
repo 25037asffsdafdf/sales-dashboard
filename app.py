@@ -194,7 +194,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     latest = current_data.iloc[0]
     
     # ----------------------------------------------------
-    # [1단계] 실적 변동율 산출
+    # [1단계] 실적 변동율 산출 및 기초 체력 확인
     # ----------------------------------------------------
     prev_month_dt = latest['period'] - pd.DateOffset(months=1)
     prev_data_df = df[df['period'] == prev_month_dt]
@@ -209,82 +209,110 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         rec_change_pct = (rec_val - prev['접수']) / prev['접수']
         rate_diff_p = (success_rate - prev['성공율']) * 100
     
-    # 국면 진단 기준 세분화
-    if rec_change_pct >= 0.15: rec_state = "폭증"
-    elif rec_change_pct >= 0.02: rec_state = "성장"
-    elif -0.05 <= rec_change_pct < 0.02: rec_state = "정체"
-    elif -0.15 <= rec_change_pct < -0.05: rec_state = "감소"
-    else: rec_state = "급락"
+    # 1축: 손님 온도계 (유입량 기준)
+    if rec_change_pct >= 0.15: rec_state = "폭증(대박)"
+    elif rec_change_pct >= 0.02: rec_state = "성장(좋음)"
+    elif -0.05 <= rec_change_pct < 0.02: rec_state = "정체(보통)"
+    elif -0.15 <= rec_change_pct < -0.05: rec_state = "감소(나쁨)"
+    else: rec_state = "급락(위험)"
         
-    if rate_diff_p >= 3.0: rate_state = "급증"
-    elif rate_diff_p >= 0.5: rate_state = "개선"
-    elif -0.5 <= rate_diff_p < 0.5: rate_state = "유지"
-    elif -3.0 <= rate_diff_p < -0.5: rate_state = "하락"
-    else: rate_state = "급락"
+    # 2축: 지갑 온도계 (계약률 기준)
+    if rate_diff_p >= 3.0: rate_state = "급증(대박)"
+    elif rate_diff_p >= 0.5: rate_state = "개선(좋음)"
+    elif -0.5 <= rate_diff_p < 0.5: rate_state = "유지(보통)"
+    elif -3.0 <= rate_diff_p < -0.5: rate_state = "하락(나쁨)"
+    else: rate_state = "급락(위험)"
+
+    # 3축: 기초 체력 (절대 계약률)에 따른 동적 메시지 조립 (150가지 확장용)
+    if success_rate >= 0.30:
+        base_health = "이미 10명 중 3명 이상이 계약하는 '매우 튼튼한 체력'을 가진 상태에서,"
+    elif success_rate >= 0.10:
+        base_health = "업계 평균적인 계약률을 유지하고 있는 상태에서,"
+    else:
+        base_health = "10명 중 1명도 계약시키기 힘든 '체력이 많이 약해진' 상태에서,"
 
     # ----------------------------------------------------
-    # [2단계] 학술 매핑 및 단도직입 처방 매트릭스
+    # [2단계] 비전공자/CEO 맞춤형 직관적 처방 (5대 메인 그룹)
     # ----------------------------------------------------
-    if rec_state in ["폭증", "성장"] and rate_state in ["급증", "개선"]:
-        theory = "LTV/CAC 극대화 모델"
-        key_issue = f"신규 유입({rec_state})과 효율({rate_state})이 동시에 올라가는 최고의 성장 사이클입니다."
-        one_line_action = "🚨 **우수 채널에 즉각 추가 광고 예산을 배정하여 점유율을 독식하십시오.**"
-        detail_action = "- 획득 가치(LTV)가 획득 비용(CAC)보다 압도적으로 높은 시기이므로 소극적 예산 통제를 지양할 것.\n- 성과가 가장 잘 나오는 고소득층 타겟 대상 크로스셀링 캠페인 동시 기획."
-    
-    elif rec_state in ["폭증", "성장"] and rate_state in ["하락", "급락"]:
-        theory = "전환 퍼널(Funnel) 보틀넥 최적화"
-        key_issue = f"광고 유입({rec_state})은 잘 되나, 내부 전환 효율({rate_state})이 무너져 유실이 발생하고 있습니다."
-        one_line_action = "🚨 **신규 마케팅을 일시 중단하고, 접수→상담 퍼널의 병목 구간을 수리하십시오.**"
-        detail_action = "- 유입된 가입 기대 수준에 비해 상담 스크립트나 조건 혜택 설계에 괴리가 있는지 점검 필요.\n- 콜 인센티브 구조 및 가입 신청 페이지의 UI 이탈 마찰력을 줄이는 작업 선행."
-    
-    elif rec_state in ["감소", "급락"] and rate_state in ["급증", "개선"]:
-        theory = "파레토 관계 마케팅 (80/20 법칙)"
-        key_issue = f"총 유입량({rec_state})은 축소되었으나, 선별된 정예 고객의 전환율({rate_state})은 상승했습니다."
-        one_line_action = "🚨 **비효율 대중 광고를 끊고, 우수 성공 고객의 '유사 프로필 타겟팅'으로 전환하십시오.**"
-        detail_action = "- 불특정 다수 타겟팅보다 우수 성공 이력을 기반으로 한 유사 타겟(Look-alike) 광고 소스 집중 분배.\n- 렌탈 객단가가 높은 프리미엄 모델 패키지 중심으로 상품 믹스 전략 재조정."
-    
-    elif rec_state in ["감소", "급락"] and rate_state in ["하락", "급락"]:
-        theory = "손실 회피(Loss Aversion) 및 넛지"
-        key_issue = f"유입량({rec_state})과 품질 효율({rate_state})이 동반 둔화되는 비즈니스 침체 국면입니다."
-        one_line_action = "🚨 **고객의 금전적 위약금 장벽과 해지 저항감을 없애는 파격 제안을 검토하십시오.**"
-        detail_action = "- '첫 달 무료 렌탈 케어' 또는 '중도 해약금 면제 보장 기간 설정' 등 행동경제학적 넛지 배치 필요.\n- 초기 설치비 면제 등 가입 장벽을 완전히 허물어 심리적 진입로를 재확보할 것."
-    
-    else: # 정체 및 유지
-        theory = "STP 마이크로 세분화 이론"
-        key_issue = "수치 변동이 극히 미미하고 고착화되어 비즈니스 활력이 고갈된 상태입니다."
-        one_line_action = "🚨 **기존 성별/연령 구분을 넘어서 '라이프스타일' 맞춤형 신규 세그먼트를 개척하십시오.**"
-        detail_action = "- 기존 상담 리스트의 유선 접촉 시간대, 주거 환경 분석 등을 통합한 마이크로 세분화 실행.\n- '1인 가구', '반려동물 가구' 등 렌탈 목적에 맞춘 세일즈 포지셔닝 타겟 재설정."
+    if "폭증" in rec_state or "성장" in rec_state:
+        if "급증" in rate_state or "개선" in rate_state:
+            theme = "최고의 황금기 (광고비 집중 투자)"
+            key_issue = f"{base_health} 이번 달은 손님도 늘고, 지갑도 더 잘 엽니다."
+            one_line_action = "📢 [공격 투자] 장사가 너무 잘 되는 시기입니다. 예산을 아끼지 말고 잘 나오는 광고에 돈을 더 쓰세요!"
+            detail_action = "- 지금 들어오는 손님들은 우리 물건을 아주 마음에 들어 합니다.\n- 물 들어올 때 노 저어야 합니다. 가장 계약을 잘 하는 손님층을 찾아 맞춤형 추가 혜택을 던지세요."
+        elif "하락" in rate_state or "급락" in rate_state:
+            theme = "밑빠진 독에 물 붓기 (내부 수리 시급)"
+            key_issue = f"{base_health} 가게에 손님은 많이 오는데, 물건은 안 사고 그냥 나가는 사람이 늘었습니다."
+            one_line_action = "📢 [광고 일시중지] 밖에서 사람을 데려오는 광고를 잠시 멈추고, 손님이 왜 계약을 안 하고 나가는지 원인을 찾으세요!"
+            detail_action = "- 손님이 기대했던 것과 실제 상담 내용이 달라서 실망하고 나갔을 확률이 높습니다.\n- 상담원들이 고객을 설득하는 대본(스크립트)을 당장 매력적으로 고쳐야 합니다."
+        else:
+            theme = "무난한 양적 성장"
+            key_issue = f"{base_health} 손님은 늘었지만, 지갑을 여는 비율은 지난달과 비슷합니다."
+            one_line_action = "📢 [현상 유지 및 혜택 추가] 늘어난 손님들을 확실한 내 고객으로 만들기 위해 작은 미끼(사은품 등)를 하나 더 던져보세요."
+            detail_action = "- 지금의 광고 방식은 아주 좋습니다. 다만 마지막에 계약서에 사인하게 만들 '결정적 한 방'이 부족합니다."
+            
+    elif "감소" in rec_state or "급락" in rec_state:
+        if "급증" in rate_state or "개선" in rate_state:
+            theme = "소수 정예 알짜배기 장사"
+            key_issue = f"{base_health} 전체 손님 수는 줄었지만, 찾아온 사람들은 아주 확실하게 지갑을 열었습니다."
+            one_line_action = "📢 [타겟 집중] 아무나 오게 하는 넓은 광고를 끊고, 진짜 살 사람만 콕 집어서 유혹하세요!"
+            detail_action = "- 찔러보기식 가짜 손님이 줄고 진짜 손님만 남았습니다. 비효율적인 마케팅 비용이 줄어들어 회사 이익엔 오히려 좋습니다.\n- 이번 달 계약한 사람들과 나이, 사는 곳이 비슷한 사람들에게만 광고를 집중하세요."
+        elif "하락" in rate_state or "급락" in rate_state:
+            theme = "심각한 비상사태 (더블 딥)"
+            key_issue = f"{base_health} 구경 오는 손님도 끊겼고, 어쩌다 온 손님도 비싸다며 도망가고 있습니다."
+            one_line_action = "📢 [파격 제안] 손님들이 가격과 위약금에 극심한 부담을 느끼고 있습니다. 말도 안 되는 파격 조건을 내거세요!"
+            detail_action = "- 불경기 탓이 큽니다. '첫 달 렌탈비 0원'이나 '위약금 안심 보장' 등 손해를 보지 않을 거라는 핑곗거리를 쥐어줘야 합니다.\n- 기존과 똑같은 방식으로 영업하면 다음 달엔 더 힘들어집니다."
+        else:
+            theme = "모객 채널의 노후화"
+            key_issue = f"{base_health} 손님들의 발길이 점점 줄어들고 있습니다."
+            one_line_action = "📢 [새로운 간판 달기] 매일 똑같은 광고에 사람들이 질렸습니다. 전혀 새로운 곳에서 손님을 찾아야 합니다."
+            detail_action = "- 우리가 평소에 안 하던 방식(예: 인스타그램 숏폼, 당근마켓 광고 등)으로 새로운 사람들의 눈길을 끌어야 합니다."
+            
+    else: # 정체
+        theme = "제자리 걸음 (돌파구 필요)"
+        key_issue = f"{base_health} 문의하는 사람도, 계약하는 사람도 지난달과 똑같이 멈춰있습니다."
+        one_line_action = "📢 [새로운 상품 조합] 뻔한 나이/성별 영업에서 벗어나, '1인 가구 패키지' 같은 완전히 새로운 상품을 만드세요!"
+        detail_action = "- 몇 달째 실적이 안 바뀐다면 시장이 우리에게 질렸다는 뜻입니다.\n- '강아지를 키우는 집 전용', '원룸 전용' 등 손님의 생활 방식에 맞춘 재밌는 상품 조합을 내세워야 합니다."
 
     # ----------------------------------------------------
-    # [3단계] UI 가독성 극대화 리포트 구성 (마크다운)
+    # [3단계] UI 가독성 및 판단 근거 투명화 리포트 (마크다운)
     # ----------------------------------------------------
     analysis_texts = []
-    analysis_texts.append(f"### 📊 {latest['period'].strftime('%Y년 %m월')} 비즈니스 진단 리포트")
+    analysis_texts.append(f"### 📊 {latest['period'].strftime('%Y년 %m월')} CEO 및 임원 보고용 비즈니스 진단")
     
-    # 1. 단도직입 핵심 Action
-    analysis_texts.append(f"### 💡 핵심 권장 Action\n{one_line_action}")
+    # 1. 가장 시급한 핵심 Action (최상단)
+    analysis_texts.append(f"### {one_line_action}")
+    analysis_texts.append("\n---")
+    
+    # 2. 🧠 AI는 왜 이렇게 진단했을까요? (판단 기준의 투명한 공개 - 핵심 요청 사항)
+    reasoning_text = f"""
+**💡 AI 진단 기준 및 판단 근거 (유치원생도 이해하는 쉬운 설명)**
+
+AI는 복잡한 숫자 대신 우리 비즈니스를 두 개의 **'건강 온도계'**로 진단했습니다.
+
+1. **🚪 손님 온도계 (신규 유입량)**: 지난달보다 손님이 얼마나 더 가게에 들어왔는가?
+   - *(+15% 이상: 폭증 / +2% 이상: 성장 / -5%~+1%: 정체 / -5% 이하: 감소 / -15% 이하: 급락)*
+   - 👉 **우리 회사의 이번 달**: 지난달보다 신규 유입이 **{rec_change_pct*100:+.1f}%** 변했으므로 **[{rec_state}]** 상태입니다.
+
+2. **💳 지갑 온도계 (계약 성공률)**: 들어온 손님 100명 중 몇 명이 진짜로 지갑을 열었는가?
+   - *(+3%p 이상: 급증 / +0.5%p 이상: 개선 / -0.4%~+0.4%: 유지 / -0.5% 이하: 하락 / -3%p 이하: 급락)*
+   - 👉 **우리 회사의 이번 달**: 지난달보다 실제 계약률이 **{rate_diff_p:+.1f}%p** 변했으므로 **[{rate_state}]** 상태입니다.
+
+**결론적으로 {key_issue}** 
+따라서 AI는 현재 우리 비즈니스의 상태를 **[{theme}]** 국면으로 규정하고 아래와 같은 실천 방안을 제안합니다.
+    """
+    analysis_texts.append(reasoning_text)
     analysis_texts.append("\n---")
 
-    # 2. 일목요연 요약 매트릭스 테이블
-    table_summary = (
-        f"| 구분 | 분석 결과 및 진단 내용 |\n"
-        f"|---|---|\n"
-        f"| **📈 현재 모객 국면** | 유입 `[{rec_state}]` (전월비 {rec_change_pct:+.1%}) |\n"
-        f"| **🎯 세일즈 효율** | 성공율 `[{rate_state}]` (전월비 {rate_diff_p:+.1f}%p) |\n"
-        f"| **🔬 추천 학술 모델** | `{theory}` |\n"
-        f"| **⚠️ 핵심 발견 문제** | {key_issue} |"
-    )
-    analysis_texts.append(table_summary)
-    analysis_texts.append("\n---")
+    # 3. 비전공자도 이해하기 쉬운 상세 실천 방안
+    analysis_texts.append(f"### 📋 실무 부서를 위한 구체적 행동 지침(Action Plan)\n{detail_action}")
     
-    # 3. 상세 처방전
-    analysis_texts.append(f"### 📋 세부 처방 가이드\n{detail_action}")
-    
-    # 4. CRM 연동 코호트가 있을 경우 간결하게 추가
+    # 4. CRM 연동 코호트
     if crm_df is not None and all(c in crm_df.columns for c in ['성공여부', '연령대', '성별', '연도']):
-        analysis_texts.append("\n---\n### 👥 CRM 코호트 핵심 요약")
+        analysis_texts.append("\n---\n### 👥 우리 고객 특성 한눈에 보기 (CRM 기반)")
+        analysis_texts.append("가입 이력을 토대로 우리 제품을 가장 좋아하는 고객 그룹과 가장 계약율이 저조했던 그룹을 찾아낸 표입니다.")
         
-        table_crm = "| 연도 | 최고 전환 세그먼트 | 최저 전환 세그먼트 | 해결을 위한 집중 Action 플랜 |\n|---|---|---|---|\n"
+        table_crm = "| 분석 연도 | 제품을 가장 좋아하는 그룹 | 계약 성공이 어려운 그룹 | 실패 극복을 위한 해결 방책 |\n|---|---|---|---|\n"
         years = sorted([y for y in crm_df['연도'].unique() if pd.notna(y)])
         
         for y in years:
@@ -305,11 +333,11 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 
                 # 심플 액션 매핑
                 if "20대" in worst[0]:
-                    action_plan = "모바일 계약서 간소화 (Friction 최저화)"
+                    action_plan = "모바일 계약서 간소화 (적는 단계 줄이기)"
                 elif "50대" in worst[0] or "60대" in worst[0]:
-                    action_plan = "시니어 전담 케어 콜 및 종이 안내장 병행"
+                    action_plan = "설명서 글자 크기 확대 및 안심 해피콜 지원"
                 else:
-                    action_plan = "연령 맞춤형 요금 결합 혜택 제시"
+                    action_plan = "맞춤형 렌탈 요금 결합 할인 제시"
                 
                 y_label = f"{int(y)}년" if isinstance(y, (int, float)) else str(y)
                 table_crm += f"| **{y_label}** | {best[0]} {best_gender} ({best_rate:.1f}%) | {worst[0]} {worst_gender} ({worst_rate:.1f}%) | {action_plan} |\n"
@@ -317,6 +345,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         analysis_texts.append(table_crm)
             
     return "\n".join(analysis_texts)
+
 
 
 # =====================================================================
