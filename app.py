@@ -51,6 +51,22 @@ def apply_custom_css():
                 font-weight: 800;
                 font-size: 1.15em;
             }
+            /* 지표 요약 테이블 시각화 CSS */
+            .summary-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+            }
+            .summary-table th, .summary-table td {
+                border: 1px solid #e0e0e0;
+                padding: 12px;
+                text-align: left;
+            }
+            .summary-table th {
+                background-color: #F8F9FA;
+                font-weight: bold;
+                width: 30%;
+            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -114,7 +130,7 @@ def parse_sales_data(uploaded_file):
                 if len(num_str) >= 6:
                     y, m = int(num_str[:4]), int(num_str[4:6])
                 elif len(nums) >= 2:
-                    y, m = int(nums[0]), int(nums)
+                    y, m = int(nums[0]), int(nums[1])
                 elif len(nums) == 1:
                     m, y = int(nums[0]), fallback_y
                 
@@ -232,8 +248,8 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 if not stats.empty and len(stats) > 0:
                     best = stats.index[0]
                     worst = stats.index[-1]
-                    best_cohort = f"{best[0]} {best}"
-                    worst_cohort = f"{worst[0]} {worst}"
+                    best_cohort = f"{best[0]} {best[1]}"
+                    worst_cohort = f"{worst[0]} {worst[1]}"
                     
                     if "20대" in best[0] or "30대" in best[0]: c_lvl = "청년층 중심"
                     elif "40대" in best[0] or "50대" in best[0]: c_lvl = "중장년층 중심"
@@ -317,14 +333,14 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     report_md = f"#### 📌 핵심 경영 지침\n"
     report_md += f"<div style='margin-bottom:20px;'><span class='action-highlight'>{action_title}</span></div>"
     
-    # 지표 요약 테이블 구성
+    # 지표 요약 테이블 시각화
     report_md += "**[월간 핵심 지표 요약]**\n"
-    report_md += "| 구분 | 지표 현황 | 변동 추이 |\n"
-    report_md += "|:---|:---|:---|\n"
-    report_md += f"| 📈 **신규 유입량** | **{v_lvl}** | 전월 대비 {rec_change_pct*100:+.1f}% |\n"
-    report_md += f"| 🎯 **계약 성공률** | **{r_lvl}** | 전월 대비 {rate_diff_p:+.1f}%p |\n"
-    report_md += f"| 🔋 **기초 체력** | **{b_lvl}** | 최종 성공률 {success_rate*100:.1f}% |\n\n"
-    
+    report_md += "<table class='summary-table'>"
+    report_md += f"<tr><th>📈 <strong>신규 유입량</strong></th><td><strong>{v_lvl}</strong> (전월 대비 {rec_change_pct*100:+.1f}%)</td></tr>"
+    report_md += f"<tr><th>🎯 <strong>계약 성공률</strong></th><td><strong>{r_lvl}</strong> (전월 대비 {rate_diff_p:+.1f}%p)</td></tr>"
+    report_md += f"<tr><th>🔋 <strong>기초 체력</strong></th><td><strong>{b_lvl}</strong> (최종 성공률 {success_rate*100:.1f}%)</td></tr>"
+    report_md += "</table>\n\n"
+
     # 종합 진단 하이라이트 박스
     report_md += f"<div class='diagnosis-box'><strong>💡 [종합 진단]</strong><br>{diagnosis}</div>\n\n"
     
@@ -336,7 +352,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         report_md += f"- {c_text}\n"
         report_md += f"- (실행 권고) 취약 타겟({worst_cohort})에 대한 무리한 영업보다 우수 타겟({best_cohort}) 대상의 교차 판매(Cross-selling)에 집중할 것을 권장합니다.\n"
 
-    # --- [팝업용: 데이터 진단 기준표 및 로직 설명 (결함 수정 완료)] ---
+    # --- [팝업용: 데이터 진단 기준표 및 로직 설명 (오류 수정 완료)] ---
     criteria_md = f"""
 **[시스템 진단 로직 및 임계치 운영 기준]**
 
@@ -344,12 +360,12 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
 
 **1. 양적 지표 (접수량 변동 기준)**
 - 측정값: 당월 접수량 전월비 증감률 (`{rec_change_pct*100:+.1f}%`)
-- 5단계 판정: 대폭 증가(+15% 이상) / 점진 증가(+2% 이상) / 보합(-5%~+1%) / 점진 감소(-15%~-5%) / 대폭 감소(-15% 미만)
+- 5단계 판정: 대폭 증가(+15% 이상) / 점진 증가(+2% 이상) / 보합(-5% ~ +2%) / 점진 감소(-15% ~ -5%) / 대폭 감소(-15% 미만)
 - 당월 판정: **{v_lvl}**
 
 **2. 질적 지표 (계약 전환율 변동 기준)**
 - 측정값: 당월 성공률 전월비 증감폭 (`{rate_diff_p:+.2f}%p`)
-- 5단계 판정: 대폭 개선(+3%p 이상) / 점진 개선(+0.5%p 이상) / 보합(-0.4%~+0.4%) / 점진 하락(-3%p~-0.5%) / 대폭 하락(-3%p 미만)
+- 5단계 판정: 대폭 개선(+3%p 이상) / 점진 개선(+0.5%p 이상) / 보합(-0.5%p ~ +0.5%p) / 점진 하락(-3.0%p ~ -0.5%p) / 대폭 하락(-3.0%p 미만)
 - 당월 판정: **{r_lvl}**
 
 **3. 기초 체력 (절대 전환율 기준)**
@@ -484,3 +500,4 @@ if sales_file:
 
 else:
     st.info("좌측 메뉴에서 매출 데이터를 업로드하여 대시보드를 시작해주십시오.")
+
