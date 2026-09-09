@@ -6,7 +6,7 @@ import traceback
 import plotly.express as px
 
 # =====================================================================
-# [0단계] 고급 디자인 커스텀 CSS
+# [0단계] 고급 디자인 커스텀 CSS (시각화 카드 UI 반영)
 # =====================================================================
 def apply_custom_css():
     st.markdown("""
@@ -36,36 +36,56 @@ def apply_custom_css():
                 color: #2C3E50 !important;
                 font-weight: 700 !important;
             }
-            /* 진단 박스 시각화 CSS */
+            
+            /* --- 새롭게 추가된 보고서 전용 시각화 UI --- */
+            .action-highlight-box {
+                background-color: #FFF3E0;
+                color: #D84315;
+                padding: 15px 20px;
+                border-radius: 8px;
+                border-left: 6px solid #E65100;
+                font-weight: 800;
+                font-size: 1.15em;
+                margin-bottom: 20px;
+                box-shadow: 0px 2px 5px rgba(0,0,0,0.05);
+            }
+            .summary-card {
+                background-color: #FFFFFF;
+                border-radius: 10px;
+                padding: 20px 15px;
+                text-align: center;
+                border: 1px solid #E0E0E0;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.04);
+                margin-bottom: 20px;
+            }
+            .summary-card h4 {
+                margin-top: 0;
+                color: #546E7A !important;
+                font-size: 1.05rem !important;
+                font-weight: 700;
+            }
+            .summary-card .value {
+                font-size: 1.6rem;
+                font-weight: 800;
+                color: #1565C0;
+                margin: 10px 0;
+            }
+            .summary-card .trend {
+                font-size: 0.95rem;
+                color: #616161;
+                background-color: #F5F5F5;
+                padding: 4px 10px;
+                border-radius: 20px;
+                display: inline-block;
+            }
             .diagnosis-box {
                 background-color: #F4F6F9;
                 padding: 20px;
                 border-radius: 8px;
                 border-left: 6px solid #1E88E5;
-                margin: 15px 0px;
+                margin-bottom: 20px;
                 font-size: 1.05em;
                 line-height: 1.6;
-            }
-            .action-highlight {
-                color: #B71C1C;
-                font-weight: 800;
-                font-size: 1.15em;
-            }
-            /* 지표 요약 테이블 시각화 CSS */
-            .summary-table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 20px;
-            }
-            .summary-table th, .summary-table td {
-                border: 1px solid #e0e0e0;
-                padding: 12px;
-                text-align: left;
-            }
-            .summary-table th {
-                background-color: #F8F9FA;
-                font-weight: bold;
-                width: 30%;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -130,7 +150,7 @@ def parse_sales_data(uploaded_file):
                 if len(num_str) >= 6:
                     y, m = int(num_str[:4]), int(num_str[4:6])
                 elif len(nums) >= 2:
-                    y, m = int(nums[0]), int(nums[1])
+                    y, m = int(nums[0]), int(nums)
                 elif len(nums) == 1:
                     m, y = int(nums[0]), fallback_y
                 
@@ -200,7 +220,7 @@ def parse_crm_data(uploaded_file):
 def generate_ai_analysis(df, selected_period, crm_df=None):
     current_data = df[df['period'] == selected_period]
     if current_data.empty or current_data.iloc[0]['접수'] == 0:
-        return {"report": "선택하신 월의 실적 데이터가 충분하지 않습니다.", "criteria": ""}
+        return None
         
     latest = current_data.iloc[0]
     prev_month_dt = latest['period'] - pd.DateOffset(months=1)
@@ -230,7 +250,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
     elif -3.0 <= rate_diff_p < -0.5: r_lvl, r_text = "점진 하락", "최종 전환율이 하락 추세로 전환"
     else: r_lvl, r_text = "대폭 하락", "최종 전환율이 심각한 수준으로 이탈"
 
-    # --- [경우의 수 3축: 기초 체력 / 절대 전환율 (4단계)] ---
+    # --- [경우의 수 3축: 기본 세일즈 전환력 (4단계)] ---
     if success_rate >= 0.30: b_lvl, b_text = "안정적 고효율", "전체 유입 인원의 30% 이상이 계약하는 견고한 수익 구조"
     elif success_rate >= 0.20: b_lvl, b_text = "양호한 효율", "업계 평균을 상회하는 안정적인 계약 구조"
     elif success_rate >= 0.10: b_lvl, b_text = "평균 효율", "추가적인 효율 개선이 요구되는 평균적 수준"
@@ -248,14 +268,14 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
                 if not stats.empty and len(stats) > 0:
                     best = stats.index[0]
                     worst = stats.index[-1]
-                    best_cohort = f"{best[0]} {best[1]}"
-                    worst_cohort = f"{worst[0]} {worst[1]}"
+                    best_cohort = f"{best[0]} {best}"
+                    worst_cohort = f"{worst[0]} {worst}"
                     
                     if "20대" in best[0] or "30대" in best[0]: c_lvl = "청년층 중심"
                     elif "40대" in best[0] or "50대" in best[0]: c_lvl = "중장년층 중심"
                     elif "60대" in best[0]: c_lvl = "시니어층 중심"
                     
-                    c_text = f"현재 주력 타겟은 [{best_cohort}]이며, 이탈이 가장 잦은 취약 타겟은 [{worst_cohort}]입니다."
+                    c_text = f"현재 당사의 주력 전환 타겟은 <b>[{best_cohort}]</b>이며, 이탈 마찰이 가장 심한 취약 타겟은 <b>[{worst_cohort}]</b>입니다."
         except: pass
 
     # --- [총 400가지 경우의 수 기반: 적용 마케팅 이론 및 행동 지침 동적 산출] ---
@@ -266,7 +286,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
             diagnosis = f"신규 유입량이 {v_text}됨과 동시에 최종 전환율이 {r_text}되고 있습니다. {b_text}를 기반으로 성장이 가속화되는 최적의 확장 국면입니다."
             action_title = "우수 마케팅 채널에 대한 예산 증액 및 타겟 범위 확대 요망"
             action_detail = (
-                "1. 현재 투입되는 고객 획득 비용(CAC) 대비 장기적 수익 가치가 매우 높게 측정됩니다.\n"
+                "1. 현재 투입되는 고객 획득 비용(CAC) 대비 장기적 수익 가치가 매우 높게 측정됩니다.<br>"
                 "2. 기존 예산의 보수적 통제를 해제하고, 성과가 입증된 채널을 중심으로 공격적인 예산 편성이 필요합니다."
             )
         elif "하락" in r_lvl:
@@ -275,7 +295,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
             diagnosis = f"신규 유입량은 {v_text}되었으나, 최종 전환율이 {r_text}되고 있습니다. {b_text} 상태로, 양적 성장 대비 질적 효율이 훼손되고 있습니다."
             action_title = "신규 광고 예산 투입의 일시적 보류 및 내부 상담 프로세스 점검 시급"
             action_detail = (
-                "1. 광고 메시지와 실제 상담 시 제공되는 혜택 간의 괴리가 이탈을 유발하고 있는지 점검이 요구됩니다.\n"
+                "1. 광고 메시지와 실제 상담 시 제공되는 혜택 간의 괴리가 이탈을 유발하고 있는지 점검이 요구됩니다.<br>"
                 "2. 가입 절차의 복잡성 및 상담 지연 등 내부 프로세스의 병목(Bottleneck) 구간을 최우선으로 수리해야 합니다."
             )
         else:
@@ -284,7 +304,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
             diagnosis = f"신규 유입량은 {v_text}된 반면, 전환율은 {r_text}인 상태입니다. 양적 유입은 성공적이나 효율은 정체되어 있습니다."
             action_title = "전환율 제고를 위한 추가 프로모션 한시적 적용 요망"
             action_detail = (
-                "1. 늘어난 유입량을 실제 계약으로 이끌어낼 마감 임박 프로모션 등 '결정적 유인책'이 부재합니다.\n"
+                "1. 늘어난 유입량을 실제 계약으로 이끌어낼 마감 임박 프로모션 등 '결정적 유인책'이 부재합니다.<br>"
                 "2. 가입 시 제공되는 기본 사은품 외에 객단가가 높은 상품에 대한 결합 할인 등을 제시하십시오."
             )
             
@@ -295,7 +315,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
             diagnosis = f"신규 유입량은 {v_text}되었으나, 반대로 전환율은 {r_text}되었습니다. 진성 고객 위주로 {b_text}를 확보 중입니다."
             action_title = "불특정 다수 대상의 매스(Mass) 마케팅 축소 및 유사 타겟팅 고도화"
             action_detail = (
-                "1. 허수 유입이 제거되고 진성 고객의 비중이 늘어나 전반적인 마케팅 비용 효율성은 상승했습니다.\n"
+                "1. 허수 유입이 제거되고 진성 고객의 비중이 늘어나 전반적인 마케팅 비용 효율성은 상승했습니다.<br>"
                 "2. 최근 계약을 체결한 고객군과 인구통계학적 요인이 유사한 '맞춤형 타겟'에만 광고를 노출하십시오."
             )
         elif "하락" in r_lvl:
@@ -304,7 +324,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
             diagnosis = f"신규 유입량이 {v_text}됨과 동시에 전환율도 {r_text}되는 이중 침체(Double Dip) 국면입니다. {b_text}가 위협받고 있습니다."
             action_title = "초기 가입에 대한 재무적 부담 최소화 및 위약금 유예 등 선제적 혜택 도입 시급"
             action_detail = (
-                "1. 대내외적 요인으로 인해 소비 심리가 위축되었으므로 일반적인 상품 안내로는 전환을 이끌어낼 수 없습니다.\n"
+                "1. 대내외적 요인으로 인해 소비 심리가 위축되었으므로 일반적인 상품 안내로는 전환을 이끌어낼 수 없습니다.<br>"
                 "2. '초기 렌탈료 1개월 면제' 또는 '해지 위약금 부담 완화' 등 고객의 재무적 리스크를 없애는 조치가 요구됩니다."
             )
         else:
@@ -313,7 +333,7 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
             diagnosis = f"신규 유입량이 {v_text}되는 추세 속에서 전환율은 {r_text}입니다. 기존 마케팅 채널의 피로도가 누적된 상태입니다."
             action_title = "기존 매체 편중에서 탈피하여 신규 고객 접점 채널 발굴 요망"
             action_detail = (
-                "1. 동일한 광고 소재와 채널이 장기간 반복 노출됨에 따라 고객의 반응률이 현저히 저하되었습니다.\n"
+                "1. 동일한 광고 소재와 채널이 장기간 반복 노출됨에 따라 고객의 반응률이 현저히 저하되었습니다.<br>"
                 "2. 타겟 연령층이 주로 소비하는 신규 매체(예: 숏폼 플랫폼, 버티컬 커뮤니티 등)로의 전환을 기획하십시오."
             )
             
@@ -323,62 +343,30 @@ def generate_ai_analysis(df, selected_period, crm_df=None):
         diagnosis = f"유입량과 전환율 모두 전월 대비 {r_lvl} 상태입니다. 전체적인 사업 실적이 {b_text} 수준에서 고착화되었습니다."
         action_title = "거시적 기준(성별/연령)을 넘어 라이프스타일 기반의 마이크로 세분화 상품 기획 필요"
         action_detail = (
-            "1. 시장의 수요가 정체된 상태로, 기존의 획일화된 렌탈 상품 라인업으로는 신규 수요 창출이 불가합니다.\n"
+            "1. 시장의 수요가 정체된 상태로, 기존의 획일화된 렌탈 상품 라인업으로는 신규 수요 창출이 불가합니다.<br>"
             "2. '1인 가구', '펫(Pet) 거주 가구' 등 특정 라이프스타일에 부합하는 결합 패키지를 신설하여 제안하십시오."
         )
 
-    # ----------------------------------------------------
-    # [5단계] 출력용 마크다운 리포트 조립 (시각화 극대화)
-    # ----------------------------------------------------
-    report_md = f"#### 📌 핵심 경영 지침\n"
-    report_md += f"<div style='margin-bottom:20px;'><span class='action-highlight'>{action_title}</span></div>"
-    
-    # 지표 요약 테이블 시각화
-    report_md += "**[월간 핵심 지표 요약]**\n"
-    report_md += "<table class='summary-table'>"
-    report_md += f"<tr><th>📈 <strong>신규 유입량</strong></th><td><strong>{v_lvl}</strong> (전월 대비 {rec_change_pct*100:+.1f}%)</td></tr>"
-    report_md += f"<tr><th>🎯 <strong>계약 성공률</strong></th><td><strong>{r_lvl}</strong> (전월 대비 {rate_diff_p:+.1f}%p)</td></tr>"
-    report_md += f"<tr><th>🔋 <strong>기초 체력</strong></th><td><strong>{b_lvl}</strong> (최종 성공률 {success_rate*100:.1f}%)</td></tr>"
-    report_md += "</table>\n\n"
-
-    # 종합 진단 하이라이트 박스
-    report_md += f"<div class='diagnosis-box'><strong>💡 [종합 진단]</strong><br>{diagnosis}</div>\n\n"
-    
-    report_md += "**[실무 부서 세부 실행 방안]**\n"
-    report_md += f"{action_detail}\n\n"
-    
-    if crm_df is not None:
-        report_md += "**[고객 코호트(Cohort) 분석 기반 특이사항]**\n"
-        report_md += f"- {c_text}\n"
-        report_md += f"- (실행 권고) 취약 타겟({worst_cohort})에 대한 무리한 영업보다 우수 타겟({best_cohort}) 대상의 교차 판매(Cross-selling)에 집중할 것을 권장합니다.\n"
-
-    # --- [팝업용: 데이터 진단 기준표 및 로직 설명 (오류 수정 완료)] ---
-    criteria_md = f"""
-**[시스템 진단 로직 및 임계치 운영 기준]**
-
-본 보고서는 아래 4개 축을 결합한 400여 가지의 경영 시나리오를 바탕으로 자동 추론되었습니다.
-
-**1. 양적 지표 (접수량 변동 기준)**
-- 측정값: 당월 접수량 전월비 증감률 (`{rec_change_pct*100:+.1f}%`)
-- 5단계 판정: 대폭 증가(+15% 이상) / 점진 증가(+2% 이상) / 보합(-5% ~ +2%) / 점진 감소(-15% ~ -5%) / 대폭 감소(-15% 미만)
-- 당월 판정: **{v_lvl}**
-
-**2. 질적 지표 (계약 전환율 변동 기준)**
-- 측정값: 당월 성공률 전월비 증감폭 (`{rate_diff_p:+.2f}%p`)
-- 5단계 판정: 대폭 개선(+3%p 이상) / 점진 개선(+0.5%p 이상) / 보합(-0.5%p ~ +0.5%p) / 점진 하락(-3.0%p ~ -0.5%p) / 대폭 하락(-3.0%p 미만)
-- 당월 판정: **{r_lvl}**
-
-**3. 기초 체력 (절대 전환율 기준)**
-- 측정값: 당월 절대 성공률 (`{success_rate*100:.1f}%`)
-- 4단계 판정: 안정적 고효율(30% 이상) / 양호한 효율(20% 이상) / 평균 효율(10% 이상) / 전환 취약(10% 미만)
-- 당월 판정: **{b_lvl}**
-
-**4. 적용된 경영/마케팅 학술 이론 및 매핑 근거**
-- 적용 모델: **{theory}**
-- 이론 선정 사유 (Rationale): {theory_rationale}
-    """
-    
-    return {"report": report_md, "criteria": criteria_md}
+    return {
+        "action_title": action_title,
+        "v_lvl": v_lvl,
+        "v_change": f"{rec_change_pct*100:+.1f}%",
+        "r_lvl": r_lvl,
+        "r_change": f"{rate_diff_p:+.1f}%p",
+        "b_lvl": b_lvl,
+        "b_rate": f"{success_rate*100:.1f}%",
+        "diagnosis": diagnosis,
+        "action_detail": action_detail,
+        "c_text": c_text,
+        "best_cohort": best_cohort,
+        "worst_cohort": worst_cohort,
+        "theory": theory,
+        "theory_rationale": theory_rationale,
+        "rec_change_pct": rec_change_pct,
+        "rate_diff_p": rate_diff_p,
+        "success_rate": success_rate,
+        "has_crm": crm_df is not None and not crm_df.empty
+    }
 
 # =====================================================================
 # [6단계] 대시보드 UI 레이아웃 구성
@@ -432,20 +420,65 @@ if sales_file:
                     
         st.markdown("<br>", unsafe_allow_html=True)
         
-        # --- 리포트 및 판단 근거 UI 레이아웃 분리 (Expander 처리 반영) ---
+        # --- 리포트 및 판단 근거 UI 레이아웃 분리 ---
         report_col, pop_col = st.columns([7, 3])
         
-        ai_output = generate_ai_analysis(df, selected_period, crm_df)
+        ai = generate_ai_analysis(df, selected_period, crm_df)
         
-        with report_col:
-            # 보고서를 열고 닫을 수 있도록 Expander 적용
-            with st.expander("📊 경영진단 요약 보고서", expanded=True):
-                st.markdown(ai_output["report"], unsafe_allow_html=True)
+        if ai:
+            with report_col:
+                with st.expander("📊 경영진단 요약 보고서", expanded=True):
+                    # 1. 핵심 경영 지침 박스
+                    st.markdown(f"<div class='action-highlight-box'>📢 핵심 경영 지침 : {ai['action_title']}</div>", unsafe_allow_html=True)
+                    
+                    # 2. 텍스트 표를 대신하는 세련된 3열 요약 카드 UI
+                    st.markdown("<b>[월간 핵심 지표 요약]</b>", unsafe_allow_html=True)
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.markdown(f"<div class='summary-card'><h4>📈 신규 유입량</h4><div class='value'>{ai['v_lvl']}</div><div class='trend'>전월 대비 {ai['v_change']}</div></div>", unsafe_allow_html=True)
+                    with c2:
+                        st.markdown(f"<div class='summary-card'><h4>🎯 계약 성공률</h4><div class='value'>{ai['r_lvl']}</div><div class='trend'>전월 대비 {ai['r_change']}</div></div>", unsafe_allow_html=True)
+                    with c3:
+                        st.markdown(f"<div class='summary-card'><h4>🔋 기본 세일즈 전환력</h4><div class='value'>{ai['b_lvl']}</div><div class='trend'>최종 성공률 {ai['b_rate']}</div></div>", unsafe_allow_html=True)
+
+                    # 3. 종합 진단 및 실무 액션 플랜
+                    st.markdown(f"<div class='diagnosis-box'><strong>💡 [종합 진단]</strong><br>{ai['diagnosis']}</div>", unsafe_allow_html=True)
+                    
+                    st.markdown("<b>[실무 부서 세부 실행 방안]</b>", unsafe_allow_html=True)
+                    st.markdown(f"<div class='detail-box'>{ai['action_detail']}</div>", unsafe_allow_html=True)
+                    st.write("")
+                    
+                    if ai['has_crm']:
+                        st.markdown("<b>[고객 코호트(Cohort) 분석 기반 특이사항]</b>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='detail-box'>{ai['c_text']}</div>", unsafe_allow_html=True)
             
-        with pop_col:
-            # 근거 팝업은 기본적으로 닫아두어 화면을 깔끔하게 유지
-            with st.expander("🔍 데이터 판단 근거 및 적용 이론", expanded=False):
-                st.markdown(ai_output["criteria"], unsafe_allow_html=True)
+            with pop_col:
+                with st.expander("🔍 데이터 판단 근거 및 적용 이론", expanded=False):
+                    criteria_md = f"""
+                    **[시스템 진단 로직 및 임계치 운영 기준]**
+                    
+                    본 보고서는 아래 4개 축을 결합한 400여 가지의 경영 시나리오를 바탕으로 자동 추론되었습니다.
+                    
+                    **1. 양적 지표 (접수량 변동 기준)**
+                    - 측정값: 당월 접수량 전월비 증감률 ({ai['v_change']})
+                    - 판정 범위: 대폭 증가(15% 이상) / 점진 증가(2% 이상) / 보합(-5% 내외) / 점진 감소(-15% 이하) / 대폭 감소(-15% 미만)
+                    - 당월 판정: **{ai['v_lvl']}**
+                    
+                    **2. 질적 지표 (계약 전환율 변동 기준)**
+                    - 측정값: 당월 성공률 전월비 증감폭 ({ai['r_change']})
+                    - 판정 범위: 대폭 개선(3%p 이상) / 점진 개선(0.5%p 이상) / 보합(-0.5%p 내외) / 점진 하락(-3.0%p 이하) / 대폭 하락(-3.0%p 미만)
+                    - 당월 판정: **{ai['r_lvl']}**
+                    
+                    **3. 기본 세일즈 전환력 기준**
+                    - 측정값: 당월 절대 성공률 ({ai['b_rate']})
+                    - 판정 범위: 안정적 고효율(30% 이상) / 양호한 효율(20% 이상) / 평균 효율(10% 이상) / 전환 취약(10% 미만)
+                    - 당월 판정: **{ai['b_lvl']}**
+                    
+                    **4. 적용된 마케팅 학술 이론 및 매핑 근거**
+                    - 적용 모델: **{ai['theory']}**
+                    - 이론 선정 사유 (Rationale): {ai['theory_rationale']}
+                    """
+                    st.markdown(criteria_md)
                 
         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -500,4 +533,3 @@ if sales_file:
 
 else:
     st.info("좌측 메뉴에서 매출 데이터를 업로드하여 대시보드를 시작해주십시오.")
-
